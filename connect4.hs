@@ -89,8 +89,8 @@ main = do
   let mymctssolver = mctsSolver (MCParams {alpha=(-1),
                                            beta=1,
                                            evalfunc=ucb1 2,
-                                           duration=500,
-                                           simulations = 1000000,
+                                           duration=1000,
+                                           maxsim = 1000000,
                                            defrand=rand})
   -- interaction initial mymctssolver mymctssolver
   humanInteraction initial mymctssolver

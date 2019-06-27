@@ -30,11 +30,11 @@ class (Show gs) => GameState gs where
   showmoves g = "Possible moves are: " ++ (unwords $ map fst $ actions g)
   showhelp = showmoves
 
--- Improvements:
--- 1. Solve the game in parallel with the user thinking
-
 class (GameState gs) => SolvedGameState gs where
   action :: gs -> IO (String, gs)
+  think :: gs -> IO gs
+
+  think g = return g
 
 data StatelessSolvedGame = forall gs. GameState gs =>
   StatelessSolvedGame {gameState :: gs,

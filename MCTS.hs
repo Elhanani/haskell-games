@@ -42,7 +42,7 @@ data MCActions = Terminal (Value, [MCAction])
 data MCParams = forall rg. RandomGen rg => MCParams
   {evalfunc :: Bool -> Value -> Value -> Value -> Value,
    alpha :: Value, beta :: Value,
-   duration :: Int, simulations :: Int,
+   duration :: Int, maxsim :: Int,
    defrand :: rg}
 
 instance Show MCSolvedGame where
@@ -94,23 +94,23 @@ mkTrunk !first !testval !xs = maybeTrunk $! partition f xs where
 timedadvance :: MCSolvedGame -> IO MCSolvedGame
 timedadvance mgs = do
   !t <- getCurrentTime
-  let !maxsim = simulations $ param mgs
+  let !maxsim' = fromIntegral $ maxsim $ params mgs
       !st = addUTCTime ((fromIntegral (duration $ params mgs))/1000) t
       internal cgs = do
         !ct <- getCurrentTime
         !rand <- newStdGen
-        print $ (simulations cgs, diffUTCTime ct t)
         if ct > st || stopcond cgs then return cgs else internal $! multiadvance 1000 cgs rand
       stopcond (MCSolvedGame {children = !(Terminal _)}) = True
-      stopcond (MCSolvedGame {simulations}) = simulations > maxsim
-  res <- internal mgs
-  let sims1 = simulations mgs
-      sims2 = simulations res
-      denom = (fromIntegral $ duration $ params mgs)/1000
-      persec = (sims2-sims1) / denom
-  putStr "Performance: "
-  print ((sims1, sims2, denom), persec)
-  return res
+      stopcond (MCSolvedGame {simulations}) = simulations > maxsim'
+  internal mgs
+  -- res <- internal mgs
+  -- let sims1 = simulations mgs
+  --     sims2 = simulations res
+  --     denom = (fromIntegral $ duration $ params mgs)/1000
+  --     persec = (sims2-sims1) / denom
+  -- putStr "Performance: "
+  -- print ((sims1, sims2, denom), persec)
+  -- return res
 
 multiadvance :: (RandomGen rg) => Int -> MCSolvedGame -> rg -> MCSolvedGame
 multiadvance n gs rand  = fst $ (iterate f (gs, rand)) !! n where
