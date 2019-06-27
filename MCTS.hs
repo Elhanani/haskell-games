@@ -112,7 +112,8 @@ mkTrunk !first !testval !xs = maybeTrunk $! partition f xs where
 advanceuntil :: MCSolvedGame -> IO (IO MCSolvedGame)
 advanceuntil mgs = if background $ params mgs then do
   mfinish <- newMVar False
-  let maxsim' = fromIntegral $ maxsim $ params mgs
+  let mgs' = mgs {params = (params mgs) {uniform=True}}
+      maxsim' = fromIntegral $ maxsim $ params mgs
       internal cgs = do
         hFlush stdout
         rand <- newStdGen
@@ -120,7 +121,7 @@ advanceuntil mgs = if background $ params mgs then do
         if finish || simulations cgs > maxsim'
           then return cgs
           else internal $! multiadvance 1000 cgs rand
-  solver <- async $ internal mgs
+  solver <- async $ internal mgs'
   return $ do
     swapMVar mfinish True
     wait solver
@@ -173,7 +174,7 @@ advanceNode !mgs@(MCSolvedGame {simulations=s, wins=w, gameState,
   (mgs {simulations = s', wins = w+val, children = f children', params = p'}, rand', val) where
     (MCAction (_, (!str, !child)), !queue) = fromJust $ PQ.extract nonterminals
     !p' = p {uniform = False}
-    !evalfunc' = if uniform then (\_ _ n _ -> n) else evalfunc
+    !evalfunc' = if uniform then (\_ _ n _ -> s-n) else evalfunc 
     !first = firstplayer gameState
     !objective = if first then maximum else minimum
     !s' = s+1
