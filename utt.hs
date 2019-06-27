@@ -127,17 +127,13 @@ symmetries = [["e5"], ["d4", "f4", "d6", "f6"], ["e4", "d5", "f5", "e6"],
 main = do
   rand <- newStdGen
   putStrLn "\n"
-  let mymctssolver1 = mctsSolver (MCParams {alpha=(-1),
-                                            beta=1,
-                                            evalfunc=ucb1 10,
+  let mymctssolver1 = mctsSolver (MCParams {alpha=(-1), beta=1,
+                                            evalfunc=ucb1 2,
                                             duration=2000,
+                                            simulations = 1000000,
                                             defrand=rand})
-      -- mymctssolver2 = mctsSolver (MCParams {alpha=(-1),
-      --                                       beta=1,
-      --                                       evalfunc=ucb1 2,
-      --                                       duration=2000,
-      --                                       defrand=rand})
-  interaction initial humanSolver mymctssolver1
+
+  humanInteraction initial mymctssolver1
 
 
 -- main = do

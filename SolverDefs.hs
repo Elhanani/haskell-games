@@ -4,11 +4,9 @@
            , BangPatterns
              #-}
 
-module SolverDefs (Value, GameState, SolvedGameState,
-                   firstplayer, terminal, actions, numactions, maxdepth, act,
-                   showmoves, showhelp, action,
+module SolverDefs (Value, GameState(..), SolvedGameState(..),
                    randomAction, statelessSolver, randomSolver, humanSolver,
-                   interaction) where
+                   interaction, humanInteraction) where
 
 import System.Random
 import System.IO
@@ -31,6 +29,9 @@ class (Show gs) => GameState gs where
   act g str = lookup str $ actions g
   showmoves g = "Possible moves are: " ++ (unwords $ map fst $ actions g)
   showhelp = showmoves
+
+-- Improvements:
+-- 1. Solve the game in parallel with the user thinking
 
 class (GameState gs) => SolvedGameState gs where
   action :: gs -> IO (String, gs)
@@ -94,3 +95,21 @@ interaction' s1 s2 = if isJust $ terminal s1
     putStrLn $ "Move chosen: " ++ move ++ "\n\n"
     let Just ns2 = act s2 move
     interaction' ns2 ns1
+
+
+humanInteraction :: forall a b c. (GameState a, SolvedGameState b) => a -> (a -> b) -> IO Value
+humanInteraction game solver = do
+  first <- multiplechoice "Would you like to be the first or second player? " ["first", "second"]
+  putStrLn "\n"
+  case first of
+    "first" -> interaction game humanSolver solver
+    "second" -> interaction game solver humanSolver
+
+multiplechoice :: String -> [String] -> IO String
+multiplechoice msg list = do
+  putStr $ msg
+  hFlush stdout
+  ans <- getLine
+  if elem ans list
+    then return ans
+    else (putStrLn $ "\n" ++ ans ++ " is not a valid answer.\n") >> multiplechoice msg list

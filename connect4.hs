@@ -85,13 +85,15 @@ initial = Board {content = A.listArray ((0,0), (5, 6)) $ repeat None,
 
 main = do
   rand <- newStdGen
-  putStrLn "\n"
+  putStrLn ""
   let mymctssolver = mctsSolver (MCParams {alpha=(-1),
                                            beta=1,
                                            evalfunc=ucb1 2,
                                            duration=500,
+                                           simulations = 1000000,
                                            defrand=rand})
-  interaction initial mymctssolver mymctssolver
+  -- interaction initial mymctssolver mymctssolver
+  humanInteraction initial mymctssolver
 
 -- main = do
 --   x <- multitimed initial 2500

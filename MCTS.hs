@@ -12,6 +12,7 @@ import qualified PQueueQuick as PQ
 
 -- Improvements:
 -- 1. Root paralellization (with different combinators: "Best" / "Sum" / etc)
+-- 2. Rollout paralellization
 -- 2. Transpositions (/memoization per single run, to make the graph into a dag)
 -- 3. Heuristics
 -- 4. RAVE / EMAF
@@ -40,7 +41,9 @@ data MCActions = Terminal (Value, [MCAction])
 
 data MCParams = forall rg. RandomGen rg => MCParams
   {evalfunc :: Bool -> Value -> Value -> Value -> Value,
-   alpha :: Value, beta :: Value, duration :: Int, defrand :: rg}
+   alpha :: Value, beta :: Value,
+   duration :: Int, simulations :: Int,
+   defrand :: rg}
 
 instance Show MCSolvedGame where
   show (MCSolvedGame {gameState}) = show gameState
@@ -91,13 +94,15 @@ mkTrunk !first !testval !xs = maybeTrunk $! partition f xs where
 timedadvance :: MCSolvedGame -> IO MCSolvedGame
 timedadvance mgs = do
   !t <- getCurrentTime
-  let !st = addUTCTime ((fromIntegral (duration $ params mgs))/1000) t
+  let !maxsim = simulations $ param mgs
+      !st = addUTCTime ((fromIntegral (duration $ params mgs))/1000) t
       internal cgs = do
         !ct <- getCurrentTime
         !rand <- newStdGen
-        if ct > st || stopcond cgs then return cgs else internal $! multiadvance 100 cgs rand
+        print $ (simulations cgs, diffUTCTime ct t)
+        if ct > st || stopcond cgs then return cgs else internal $! multiadvance 1000 cgs rand
       stopcond (MCSolvedGame {children = !(Terminal _)}) = True
-      stopcond _ = False
+      stopcond (MCSolvedGame {simulations}) = simulations > maxsim
   res <- internal mgs
   let sims1 = simulations mgs
       sims2 = simulations res
@@ -164,17 +169,17 @@ rollout !gs !rand = if isJust tgs then (fromJust tgs, rand) else rollout gs' ran
   !(idx, rand') = randomR (0, nags-1) $! rand
   gs' = snd $! ags !! idx
 
+rollouts :: (GameState a, RandomGen b) => Int -> a -> b -> Value
+rollouts 0 _ _ = 0
+rollouts n gs rand = v + (rollouts (n-1) gs rand') where
+  (v, rand') = rollout gs rand
+
 mctsSolver :: GameState a => MCParams -> a -> MCSolvedGame
 mctsSolver params@(MCParams {defrand}) gs = fst $ mkLeaf params defrand gs
 
 
 
 -- For performace measuring only!
-
-rollouts :: (GameState a, RandomGen b) => Int -> a -> b -> Value
-rollouts 0 _ _ = 0
-rollouts n gs rand = v + (rollouts (n-1) gs rand') where
-  (v, rand') = rollout gs rand
 
 timedrollouts :: (GameState a) => a -> UTCTime -> IO (Value, Int)
 timedrollouts gs st = do
