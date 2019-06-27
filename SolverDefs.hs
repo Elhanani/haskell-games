@@ -32,9 +32,9 @@ class (Show gs) => GameState gs where
 
 class (GameState gs) => SolvedGameState gs where
   action :: gs -> IO (String, gs)
-  think :: gs -> IO gs
+  think :: gs -> IO (IO gs)
 
-  think g = return g
+  think g = return $ return g
 
 data StatelessSolvedGame = forall gs. GameState gs =>
   StatelessSolvedGame {gameState :: gs,
@@ -79,7 +79,7 @@ humanSolver = statelessSolver humanaction where
       "moves" -> (putStrLn $ showmoves gs ++ "\n") >> humanaction gs
       "help" -> (putStrLn $ showhelp gs ++ "\n") >> humanaction gs
       otherwise -> let ngs = act gs move in if isNothing ngs
-        then (putStrLn $ move ++ " is not a valid move!\n Enter 'moves' to list possible moves.\n") >> humanaction gs
+        then (putStrLn $ move ++ " is not a valid move!\nEnter 'moves' to list possible moves.\n") >> humanaction gs
         else return move
 
 interaction :: forall a b c. (GameState a, SolvedGameState b, SolvedGameState c) =>
@@ -90,12 +90,13 @@ interaction' :: forall a b. (SolvedGameState a, SolvedGameState b) => a -> b -> 
 interaction' s1 s2 = if isJust $ terminal s1
   then print s1 >> putStrLn "\n" >> (return $ fromJust $ terminal s1)
   else do
+    ts2 <- think s2
     print s1
     (move, ns1) <- action s1
     putStrLn $ "Move chosen: " ++ move ++ "\n\n"
-    let Just ns2 = act s2 move
+    s2' <- ts2
+    let Just ns2 = act s2' move
     interaction' ns2 ns1
-
 
 humanInteraction :: forall a b c. (GameState a, SolvedGameState b) => a -> (a -> b) -> IO Value
 humanInteraction game solver = do

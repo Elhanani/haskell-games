@@ -8,16 +8,19 @@ import System.Random
 import Data.Time
 import Data.List
 import Control.Concurrent.Async
+import Control.Concurrent.MVar
 import qualified PQueueQuick as PQ
+
+import System.IO
 
 -- Improvements:
 -- 1. Root paralellization (with different combinators: "Best" / "Sum" / etc)
--- 2. Rollout paralellization
 -- 2. Transpositions (/memoization per single run, to make the graph into a dag)
 -- 3. Heuristics
 -- 4. RAVE / EMAF
 -- 5. Ability to switch to a different solver (ab?) on one thread for the end game
-
+-- 6. Multiple rollouts.
+-- 7. Params need to sit in a reader monad / belong to advnace and not the game (only defaults)
 
 data MCSolvedGame = forall gs. (GameState gs) =>
     MCSolvedGame {gameState :: gs,
@@ -42,7 +45,13 @@ data MCActions = Terminal (Value, [MCAction])
 data MCParams = MCParams
   {evalfunc :: Bool -> Value -> Value -> Value -> Value,
    alpha :: Value, beta :: Value,
-   duration :: Int, maxsim :: Int, background :: Bool}
+   duration :: Int, maxsim :: Int, background :: Bool,
+   uniform :: Bool}
+
+defaultMCParams :: MCParams
+defaultMCParams = MCParams {evalfunc = ucb1 2, alpha = (-1), beta = 1,
+                            duration = 1000, maxsim = 2000000, background = True,
+                            uniform = False}
 
 instance Show MCSolvedGame where
   show (MCSolvedGame {gameState}) = show gameState
@@ -67,6 +76,7 @@ instance SolvedGameState MCSolvedGame where
       (MCAction (_, (_, MCSolvedGame {wins=w2, simulations=s2}))) =
         compare (w1/s1) (w2/s2)
     objective = if firstplayer mgs then maximumBy else minimumBy
+  think = advanceuntil
 
 mkLeaf :: (GameState gs, RandomGen rg) => MCParams -> rg -> gs -> (MCSolvedGame, rg)
 mkLeaf !params !rand !gameState =
@@ -99,6 +109,23 @@ mkTrunk !first !testval !xs = maybeTrunk $! partition f xs where
     then Terminal (testval, xs ++ ys)
     else Trunk (PQ.fromList xs, ys)
 
+advanceuntil :: MCSolvedGame -> IO (IO MCSolvedGame)
+advanceuntil mgs = if background $ params mgs then do
+  mfinish <- newMVar False
+  let maxsim' = fromIntegral $ maxsim $ params mgs
+      internal cgs = do
+        hFlush stdout
+        rand <- newStdGen
+        finish <- readMVar mfinish
+        if finish || simulations cgs > maxsim'
+          then return cgs
+          else internal $! multiadvance 1000 cgs rand
+  solver <- async $ internal mgs
+  return $ do
+    swapMVar mfinish True
+    wait solver
+  else return $ return mgs
+
 timedadvance :: MCSolvedGame -> IO MCSolvedGame
 timedadvance mgs = do
   !t <- getCurrentTime
@@ -110,15 +137,15 @@ timedadvance mgs = do
         if ct > st || stopcond cgs then return cgs else internal $! multiadvance 1000 cgs rand
       stopcond (MCSolvedGame {children = !(Terminal _)}) = True
       stopcond (MCSolvedGame {simulations}) = simulations > maxsim'
-  internal mgs
-  -- res <- internal mgs
-  -- let sims1 = simulations mgs
-  --     sims2 = simulations res
-  --     denom = (fromIntegral $ duration $ params mgs)/1000
-  --     persec = (sims2-sims1) / denom
-  -- putStr "Performance: "
-  -- print ((sims1, sims2, denom), persec)
-  -- return res
+  -- internal mgs
+  res <- internal mgs
+  let sims1 = simulations mgs
+      sims2 = simulations res
+      denom = (fromIntegral $ duration $ params mgs)/1000
+      persec = (sims2-sims1) / denom
+  putStr "Performance: "
+  print ((sims1, sims2, denom), persec)
+  return res
 
 multiadvance :: (RandomGen rg) => Int -> MCSolvedGame -> rg -> MCSolvedGame
 multiadvance n gs rand  = fst $ (iterate f (gs, rand)) !! n where
@@ -129,7 +156,7 @@ advanceNode :: (RandomGen rg) => MCSolvedGame -> rg -> (MCSolvedGame, rg, Value)
 advanceNode !mgs@(MCSolvedGame {children = (Terminal (tval, _))}) rand = (mgs, rand, tval)
 advanceNode !mgs@(MCSolvedGame {simulations, wins=w, gameState,
                                 children = (Bud (len, post, pre)),
-                                params = p@(MCParams {evalfunc, alpha, beta})}) rand =
+                                params = !p@(MCParams {evalfunc, alpha, beta})}) rand =
   (mgs {simulations = simulations+1, wins = w+val, children = f children'}, rand', val) where
     !(!str, !gs) = head pre
     !(!ngs, !rand') = mkLeaf p rand gs
@@ -142,9 +169,11 @@ advanceNode !mgs@(MCSolvedGame {simulations, wins=w, gameState,
     f !bud = bud
 advanceNode !mgs@(MCSolvedGame {simulations=s, wins=w, gameState,
                                 children = (Trunk (nonterminals, terminals)),
-                                params = (MCParams {evalfunc, alpha, beta})}) rand =
-  (mgs {simulations = s', wins = w+val, children = f children'}, rand', val) where
+                                params = !p@(MCParams {evalfunc, alpha, beta, uniform})}) rand =
+  (mgs {simulations = s', wins = w+val, children = f children', params = p'}, rand', val) where
     (MCAction (_, (!str, !child)), !queue) = fromJust $ PQ.extract nonterminals
+    !p' = p {uniform = False}
+    !evalfunc' = if uniform then (\_ _ n _ -> n) else evalfunc
     !first = firstplayer gameState
     !objective = if first then maximum else minimum
     !s' = s+1
@@ -154,7 +183,7 @@ advanceNode !mgs@(MCSolvedGame {simulations=s, wins=w, gameState,
         then Terminal (tval, (MCAction (tval, (str, child')):terminals) ++ PQ.toAscList queue)
         else Trunk (queue, MCAction (tval, (str, child')):terminals)
       otherwise -> Trunk (PQ.insert nact queue, terminals) where
-        !eval = fromMaybe (evalfunc first (wins child') (simulations child) s')
+        !eval = fromMaybe (evalfunc' first (wins child') (simulations child) s')
                           (terminalVal $ children child')
         !nact = MCAction (eval ,(str, child'))
     f ch@(Trunk (!q', nt')) = if isNothing $ PQ.extract q'

@@ -82,11 +82,7 @@ initial = Board {content = A.listArray ((0,0), (5, 6)) $ repeat None,
                  terminal' = Nothing,
                  numactions' = 7}
 
-mymctssolver = mctsSolver (MCParams {alpha=(-1), beta=1,
-                                     evalfunc=ucb1 2,
-                                     duration=1000,
-                                     maxsim = 1000000,
-                                     background = True})
+mymctssolver = mctsSolver defaultMCParams
 
 
 main = putStrLn "" >> humanInteraction initial mymctssolver
