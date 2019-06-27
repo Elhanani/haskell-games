@@ -6,7 +6,6 @@ import SolverDefs
 import MCTS
 import qualified Data.Array as A
 import qualified PQueueQuick as PQ
-import System.Random
 
 data Square = Ex | Oh | None deriving Eq
 data BoardState = Board {content :: A.Array (Int, Int) Square,
@@ -83,17 +82,14 @@ initial = Board {content = A.listArray ((0,0), (5, 6)) $ repeat None,
                  terminal' = Nothing,
                  numactions' = 7}
 
-main = do
-  rand <- newStdGen
-  putStrLn ""
-  let mymctssolver = mctsSolver (MCParams {alpha=(-1),
-                                           beta=1,
-                                           evalfunc=ucb1 2,
-                                           duration=1000,
-                                           maxsim = 1000000,
-                                           defrand=rand})
-  -- interaction initial mymctssolver mymctssolver
-  humanInteraction initial mymctssolver
+mymctssolver = mctsSolver (MCParams {alpha=(-1), beta=1,
+                                     evalfunc=ucb1 2,
+                                     duration=1000,
+                                     maxsim = 1000000,
+                                     background = True})
+
+
+main = putStrLn "" >> humanInteraction initial mymctssolver
 
 -- main = do
 --   x <- multitimed initial 2500

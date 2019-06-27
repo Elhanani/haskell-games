@@ -39,11 +39,10 @@ data MCActions = Terminal (Value, [MCAction])
                | forall gs. GameState gs => Bud (Value, [MCAction], [(String, gs)])
                | Trunk (PQ.PQueue MCAction, [MCAction])
 
-data MCParams = forall rg. RandomGen rg => MCParams
+data MCParams = MCParams
   {evalfunc :: Bool -> Value -> Value -> Value -> Value,
    alpha :: Value, beta :: Value,
-   duration :: Int, maxsim :: Int,
-   defrand :: rg}
+   duration :: Int, maxsim :: Int, background :: Bool}
 
 instance Show MCSolvedGame where
   show (MCSolvedGame {gameState}) = show gameState
@@ -54,10 +53,9 @@ instance GameState MCSolvedGame where
   maxdepth (MCSolvedGame {gameState}) = maxdepth gameState
   actions (MCSolvedGame {children = Terminal (_, xs)}) = map (snd . unMCAction) xs
   actions (MCSolvedGame {children = Trunk (xs, ys)}) = map (snd . unMCAction) ((PQ.toAscList xs) ++ ys)
-  actions (MCSolvedGame {gameState, children = Bud (_, solved, unsolved),
-                         params = p@(MCParams {defrand})}) =
+  actions (MCSolvedGame {gameState, children = Bud (_, solved, unsolved), params=p}) =
     (map (snd . unMCAction) solved) ++ (map f unsolved) where
-      f (str, gs) = (str, fst $ mkLeaf p defrand gs)
+      f (str, gs) = (str, mkLeaf' p gs)
 
 instance SolvedGameState MCSolvedGame where
   action mgs = best <$> timedadvance mgs where
@@ -79,6 +77,16 @@ mkLeaf !params !rand !gameState =
       then let justval = fromJust maybeval in (justval, Terminal (justval, []), rand)
       else (wins', Bud (fromIntegral $ numactions $! gameState, [], actions $! gameState), rand'') where
         !(!wins', !rand'') = rollout gameState $! rand
+
+mkLeaf' :: GameState gs => MCParams -> gs -> MCSolvedGame
+mkLeaf' !params !gameState =
+  MCSolvedGame {gameState, simulations, wins, children, params} where
+    !maybeval = terminal gameState
+    !simulations = 0
+    !wins = 0
+    !children = if isJust $! maybeval
+      then Terminal (fromJust maybeval, [])
+      else Bud (fromIntegral $ numactions $! gameState, [], actions $! gameState)
 
 mkTrunk :: Bool -> Value -> [MCAction] -> MCActions
 mkTrunk !first !testval !xs = maybeTrunk $! partition f xs where
@@ -175,7 +183,7 @@ rollouts n gs rand = v + (rollouts (n-1) gs rand') where
   (v, rand') = rollout gs rand
 
 mctsSolver :: GameState a => MCParams -> a -> MCSolvedGame
-mctsSolver params@(MCParams {defrand}) gs = fst $ mkLeaf params defrand gs
+mctsSolver params gs = mkLeaf' params gs
 
 
 
