@@ -7,11 +7,14 @@ import Control.Monad.State
 import System.Environment
 import System.Random
 
+
+-- | The message is an artifact of a previous computation.
 data NimGame = Nim {player' :: Player,
                     message :: String,
                     p1 :: Integer,
                     p2 :: Integer}
 
+-- | This produces correct results from the game's perspective, but may show the wrong thing.
 instance Eq NimGame where
   Nim {player'=f1, p1=p11, p2=p12} == Nim {player'=f2, p1=p21, p2=p22} = (f1, p11, p12) == (f2, p21, p22)
 
@@ -32,6 +35,7 @@ instance Show NimGame where
     movestr = if maxmove == 1 then "The only possible move is 1\n" else
       "Possible moves are between 1 and " ++ (show maxmove) ++ " (inclusive)\n"
 
+-- | The game's solution
 nimsolver :: NimGame -> String
 nimsolver Nim {p1, p2} = show play where
   [small, big] = sort [p1, p2]
@@ -57,6 +61,7 @@ instance GameState NimGame where
 initial :: Integer -> Integer -> NimGame
 initial p1 p2 = Nim {player' = Maximizer, message = "", p1, p2}
 
+-- | Just sets random parameters for the initial state
 boundary :: [Integer] -> [Integer]
 boundary [] = boundary [10000]
 boundary [n] = boundary [n, quot n 10]

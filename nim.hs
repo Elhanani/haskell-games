@@ -32,6 +32,7 @@ nimSolver gs@(Nim (_, piles)) = do
         goodmove = if nimsum == 0 then const True else (\(n, m) -> nimsum == xor n m)
     randomAction $ fmap movename $ filter goodmove moveset
 
+-- | Just sets random parameters for the initial state
 pilemaker :: StdGen -> [String] -> [Integer]
 pilemaker rand [] = pilemaker rand [show $ head $ (randomRs (3, 10) rand :: [Int])]
 pilemaker rand [n] = pilemaker rand [n, show $ 10 + quot 100 (read n)]

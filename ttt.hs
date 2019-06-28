@@ -8,6 +8,7 @@ import qualified Data.Array as A
 data Square = Ex | Oh | None deriving (Eq, Ord)
 type Miniboard = A.Array Int Square
 
+-- | Number of moves played so far, the board itself, and the terminal value
 newtype BoardState = Board (Int, Miniboard, Maybe Value) deriving (Eq, Ord)
 
 instance Show BoardState where
@@ -31,20 +32,24 @@ instance GameState BoardState where
   terminal (Board (_, _, v)) = v
   actions gs@(Board (_, _, v)) = catMaybes [fmap ((,) (show (n+1))) (mkState gs n) | n <- [0..8]]
 
+-- | The winning positions
 winners :: [[Int]]
 winners = [[0, 1, 2], [3, 4, 5], [6, 7, 8],
            [0, 3, 6], [1, 4, 7], [2, 5, 8],
            [0, 4, 8], [2, 4, 6]]
 
+-- | Required extra 2 positions for a win
 complements :: Int -> [[Int]]
 complements = (arr A.!) where
   arr = A.listArray (0, 8) $ map comps [0..8]
   comps n = map (filter (/= n)) $ filter (elem n) winners
 
+-- | Is playing in this square wins the game?
 isWinner :: Square -> Int -> BoardState -> Bool
 isWinner player pos (Board (_, xs, _)) = or [and $ map f comps | comps <- complements pos]
   where f n = xs A.! n == player
 
+-- | Produces the branch states
 mkState :: BoardState -> Int -> Maybe BoardState
 mkState gs@(Board (l, b, v)) n = if b A.! n /= None then Nothing else let
   player' = player gs
@@ -57,6 +62,7 @@ mkState gs@(Board (l, b, v)) n = if b A.! n /= None then Nothing else let
   next x = Just $ Board (l+1, nb, x)
   in if winner then next $ winval else if l == 8 then next (Just 0) else next Nothing
 
+-- | Initial state
 initial :: BoardState
 initial = Board (0, A.listArray (0, 8) $ repeat None, Nothing)
 

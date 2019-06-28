@@ -40,6 +40,7 @@ zeckendorf n = internal n fibs where
     | k < x = internal k xs
     | otherwise  = x : internal (k-x) xs
 
+-- | The guaranteed solution
 nimsolver1 :: NimGame -> String
 nimsolver1 (Nim {pile = p, limit = l})
   | l >= p = show p
@@ -47,6 +48,7 @@ nimsolver1 (Nim {pile = p, limit = l})
   | otherwise = "1"
   where r = last $ zeckendorf p
 
+-- | The quickest solution for a win
 nimsolver2 :: NimGame -> String
 nimsolver2 (Nim {pile = p, limit = l}) = if null wins then "1" else show $ head wins where
   q = min l $ quot (p-1) 3
@@ -57,6 +59,7 @@ nimsolver2 (Nim {pile = p, limit = l}) = if null wins then "1" else show $ head 
 initial :: Integer -> NimGame
 initial p = Nim {player' = Maximizer, limit = p-1, pile = p}
 
+-- | Just sets random parameters for the initial state
 boundary :: [Integer] -> [Integer]
 boundary [] = boundary [100]
 boundary [n] = boundary [n, quot n 2]

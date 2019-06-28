@@ -16,6 +16,7 @@ type Miniboard = A.Array Int Square
 type MiniPlus = Either Square (Int, Miniboard)
 type Bigboard = A.Array Int MiniPlus
 
+-- | (player, board state, next miniboard to play, terminal value)
 newtype BoardState = Board (Player, Bigboard, Maybe Int, Maybe Value) deriving (Eq, Ord)
 
 miniShow :: Bool -> MiniPlus -> [String]
@@ -64,32 +65,39 @@ instance GameState BoardState where
   numactions (Board (_, !bb, Nothing, _)) = sum $! map (miniMovesNum . ((A.!) bb)) [0..8]
   maxdepth (Board (_, !bb, _, _)) = Just $! sum $! map (miniMovesNum . ((A.!) bb)) [0..8]
 
+-- | Winning configurations for a miniboard
 winners :: [[Int]]
 winners = [[0, 1, 2], [3, 4, 5], [6, 7, 8],
            [0, 3, 6], [1, 4, 7], [2, 5, 8],
            [0, 4, 8], [2, 4, 6]]
 
+-- | Required squares to complete a win
 compsarr :: A.Array Int [[Int]]
 compsarr = A.listArray (0, 8) $ map comps [0..8] where
   comps !n = map (filter (/= n)) $ filter (elem n) winners
 
+-- | Will a move win a game
 isMiniWinner :: Square -> Int -> Miniboard -> Bool
 isMiniWinner !player !pos !xs = or [and $ map f comps | comps <- compsarr A.! pos]
   where f !n = xs A.! n == player
 
+-- | How many moves in the miniboard
 miniMovesNum :: MiniPlus -> Int
 miniMovesNum !(Left _) = 0
 miniMovesNum !(Right !(!n, !mini)) = 9 - n
 
+-- | The possible moves of the miniboard
 miniMoves :: MiniPlus -> [Int]
 miniMoves !(Left _) = []
 miniMoves !(Right !(_, !mini)) = [n | n <- [0..8], mini A.! n == None]
 
+-- | Actions corresponding to the miniboard
 miniActions :: BoardState -> Int -> [(String, BoardState)]
 miniActions !gs@(Board (_, !bb, _, _)) x =
   map internal $! miniMoves $! bb A.! x where
     internal !y = (movename (x, y), mkState gs x y)
 
+-- | Play the y'th square on the x'th miniboard
 mkState :: BoardState -> Int -> Int -> BoardState
 mkState !gs@(Board (!player', !bb, _, _)) !x !y = Board (otherPlayer player', nbb, nextpos, terminal) where
     !(!cnt, !rbbx) = fromRight undefined $! bb A.! x
@@ -114,7 +122,7 @@ initial :: BoardState
 initial = Board (Maximizer, array8 $ Right $ (0, array8 None), Nothing, Nothing) where
   array8 x = A.listArray (0, 8) $ repeat x
 
-
+-- | Symmetries for the first move
 symmetries :: [[String]]
 symmetries = [["e5"], ["d4", "f4", "d6", "f6"], ["e4", "d5", "f5", "e6"],
               ["b2", "h2", "b8", "h8"], ["a1", "i1", "a9", "i9"], ["c3", "g3", "g7", "c7"],
@@ -128,9 +136,9 @@ symmetries = [["e5"], ["d4", "f4", "d6", "f6"], ["e4", "d5", "f5", "e6"],
 
 -- main = putStrLn "\n" >> interaction initial randomSolver randomSolver
 
-mymctssolver = mctsSolver defaultMCParams {background=False}
+mymctssolver = mctsSolver defaultMCParams -- {background=False}
 
--- main = putStrLn " ">> humanInteraction initial mymctssolver1
+-- main = putStrLn " ">> humanInteraction initial mymctssolver
 
 main = putStrLn "\n\n\n" >> interaction initial mymctssolver mymctssolver >> main
 

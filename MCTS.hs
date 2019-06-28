@@ -13,14 +13,6 @@ import qualified PQueueQuick as PQ
 
 import System.IO
 
--- Improvements:
--- 1. Root paralellization (with different combinators: "Best" / "Sum" / etc)
--- 2. Transpositions (/memoization per single run, to make the graph into a dag)
--- 3. Heuristics
--- 4. RAVE / EMAF
--- 5. Ability to switch to a different solver (ab?) on one thread for the end game
--- 6. Multiple rollouts. Depending on the root simulations count, 1 + round (#/1000000)
--- 7. Params need to sit in a reader monad / belong to advnace and not the game (only defaults)
 
 data MCSolvedGame = forall gs. (GameState gs) =>
     MCSolvedGame {gameState :: gs,

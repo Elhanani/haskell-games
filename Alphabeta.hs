@@ -7,10 +7,6 @@ import Data.Maybe
 import Data.List
 import System.Random
 
--- Improvements:
--- 0. Consolidate alphabeta and chAlphabeta
--- 1. Memoizations
--- 2. Node heuristics
 
 type ABValue = (Value, Value)
 
@@ -20,10 +16,13 @@ data ABParams gs = ABParams {alpha :: {-# UNPACK #-} !Value, beta :: {-# UNPACK 
 defaultABParams :: forall gs. (GameState gs) => ABParams gs
 defaultABParams = ABParams {alpha = -1, beta = 1, chooser = Nothing}
 
+-- | A choice heuristic is used to start the search from the most promising branches first
 type ChoiceHeuristic gs = gs -> String -> Value
 
+-- | A state heuristic is used to bound the searches
 type StateHeuristic gs = gs -> Value
 
+-- | The value is computed lazily using the abvalue function
 data ABSolvedGame = forall gs. (GameState gs) =>
   ABSolvedGame {gameState :: gs,
                 actions' :: [(String, ABSolvedGame)],
@@ -39,12 +38,13 @@ instance GameState ABSolvedGame where
   maxdepth (ABSolvedGame {gameState}) = maxdepth gameState
   actions = actions'
 
--- This may be multithreaded!
+-- This is the top search and could be made multithreaded.
 instance SolvedGameState ABSolvedGame where
   action g = do
     rand <- newStdGen
     return $ head $ filter ((== value g) . value . snd) $ fst $ shuffle (actions g) rand
 
+-- | (Lazily) Shuffle the list
 shuffle :: forall a rg. (RandomGen rg) => [a] -> rg -> ([a], rg)
 shuffle [] rand = ([], rand)
 shuffle xs rand = (x:rest', rand'') where
@@ -53,6 +53,7 @@ shuffle xs rand = (x:rest', rand'') where
   rest = (take k xs) ++ (drop (k+1) xs)
   (rest', rand'') = shuffle rest rand'
 
+-- | Solve the game for the alpha/beta given
 alphabetaSolver :: (GameState a) => ABValue -> a -> ABSolvedGame
 alphabetaSolver !ab !gameState = ABSolvedGame {gameState, actions', abvalue = abval, value} where
   internal (!str, !gs) = (str, alphabetaSolver ab gs)
@@ -67,6 +68,7 @@ alphabetaSolver !ab !gameState = ABSolvedGame {gameState, actions', abvalue = ab
         Maximizer -> max kidval $ alphabetize xs (max a kidval, b)
         Minimizer -> min kidval $ alphabetize xs (a, min b kidval)
 
+-- | To be consolidated into alphabeta solver by using ABParams
 chAlphabetaSolver :: (GameState a) => ChoiceHeuristic a -> ABValue -> a -> ABSolvedGame
 chAlphabetaSolver !chooser !ab !gameState = ABSolvedGame {gameState, actions', abvalue = abval, value} where
   internal (!str, !gs) = (str, alphabetaSolver ab gs)

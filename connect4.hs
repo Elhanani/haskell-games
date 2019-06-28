@@ -42,6 +42,7 @@ instance GameState BoardState where
   numactions = numactions'
   maxdepth !gs = Just $! 9 - (totalmoves gs)
 
+-- | The array corresponding to the required positions needed to complete a win
 compsarr :: A.Array (Int, Int) [([(Int, Int)], [(Int, Int)])]
 compsarr = A.array ((0,0), (5, 6)) $ map comps $ (,) <$> [0..5] <*> [0..6] where
   comps (x, y) = ((x, y), limit4 [rows, cols, diag1, diag2]) where
@@ -52,6 +53,7 @@ compsarr = A.array ((0,0), (5, 6)) $ map comps $ (,) <$> [0..5] <*> [0..6] where
     diag1 = (limitboard [(x-i, y-i) | i <- [1..3]], limitboard [(x+i, y+i) | i <- [1..3]])
     diag2 = (limitboard [(x+i, y-i) | i <- [1..3]], limitboard [(x-i, y+i) | i <- [1..3]])
 
+-- | Will playing in that position complete a win?
 isWinner :: BoardState -> Square -> Int -> Bool
 isWinner (!Board {content, heights}) !player !col =
   or $ map f $! compsarr A.! pos where
@@ -61,7 +63,7 @@ isWinner (!Board {content, heights}) !player !col =
       !remaining1 = 3 - stretch dir1
       !remaining2 = remaining1 - (stretch $ take remaining1 dir2)
 
-
+-- | Next state after a move
 mkState :: BoardState -> Int -> BoardState
 mkState !gs@(Board {content, heights, totalmoves, numactions'}) !col =
   Board {content=con', heights=hei', totalmoves=tot', numactions'=num', terminal'=ter'} where
@@ -77,6 +79,7 @@ mkState !gs@(Board {content, heights, totalmoves, numactions'}) !col =
     !ter' = if isWinner gs sqrtype col then winval
       else if draw then Just 0 else Nothing
 
+-- | An empty board
 initial :: BoardState
 initial = Board {content = A.listArray ((0,0), (5, 6)) $ repeat None,
                  heights = A.listArray (0, 6) $ repeat 0,
@@ -84,11 +87,11 @@ initial = Board {content = A.listArray ((0,0), (5, 6)) $ repeat None,
                  terminal' = Nothing,
                  numactions' = 7}
 
-mymctssolver = mctsSolver defaultMCParams {background=True}
+mymctssolver = mctsSolver defaultMCParams {background=True, duration=2000}
 
 
--- main = putStrLn "" >> humanInteraction initial mymctssolver
-main = putStrLn "\n\n\n" >> interaction initial mymctssolver mymctssolver >> main
+main = putStrLn "" >> humanInteraction initial mymctssolver
+-- main = putStrLn "\n\n\n" >> interaction initial mymctssolver mymctssolver >> main
 
 -- main = do
 --   x <- multitimed initial 2500
