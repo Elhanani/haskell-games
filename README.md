@@ -2,7 +2,7 @@
 
 Games are instances of the class `GameState`. The minimal complete definition for this class must implement the following function:
 
-* `firstplayer` - this Boolean is set to `True` if it's the first (maximizing) player's turn.
+* `player` - the player whose current turn it is (either `Maximizer` or `Minimizer`).
 * `terminal` - this must be set to `Nothing` for all terminal nodes, and to `Just val` where `val` is the outcome of the game.
 * `actions` - these is a list of pairs `(name, result)` where `name` is the move's name, and `branch` is the is sub branch of the game that is reached with the move.
 

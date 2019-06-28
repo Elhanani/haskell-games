@@ -21,11 +21,13 @@ instance Show BoardState where
       1 -> "Mrs. Cross wins!"
       0 -> "It's a draw!"
       (-1) -> "Mr. Knott wins!"
-    playermessage = if firstplayer gs then "It's Mrs. Cross' turn.\n" else "It's Mr. Knott's turn.\n"
+    playermessage = case player gs of
+      Maximizer -> "It's Mrs. Cross' turn.\n"
+      Minimizer ->  "It's Mr. Knott's turn.\n"
     movemessage = "Possible moves are " ++ (unwords $ map fst $ actions gs) ++ "\n"
 
 instance GameState BoardState where
-  firstplayer (Board (n, _, _)) = mod n 2 == 0
+  player (Board (n, _, _)) = if mod n 2 == 0 then Maximizer else Minimizer
   terminal (Board (_, _, v)) = v
   actions gs@(Board (_, _, v)) = catMaybes [fmap ((,) (show (n+1))) (mkState gs n) | n <- [0..8]]
 
@@ -45,9 +47,11 @@ isWinner player pos (Board (_, xs, _)) = or [and $ map f comps | comps <- comple
 
 mkState :: BoardState -> Int -> Maybe BoardState
 mkState gs@(Board (l, b, v)) n = if b A.! n /= None then Nothing else let
-  first = firstplayer gs
-  sqrtype = if first then Ex else Oh
-  winval = Just $ if first then 1 else -1
+  player' = player gs
+  sqrtype = case player' of
+    Maximizer -> Ex
+    Minimizer -> Oh
+  winval = Just $ playerValue player'
   nb = b A.// [(n, sqrtype)]
   winner = isWinner sqrtype n gs
   next x = Just $ Board (l+1, nb, x)

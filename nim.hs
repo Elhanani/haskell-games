@@ -5,19 +5,21 @@ import Data.Bits
 import System.Random
 import qualified Data.Set as Set
 
-newtype NimGame = Nim (Bool, [Integer]) deriving Eq
+newtype NimGame = Nim (Player, [Integer]) deriving Eq
 
 instance Show NimGame where
-  show (Nim (first, piles)) = (unwords $ map show piles) ++ message where
+  show (Nim (player', piles)) = (unwords $ map show piles) ++ message where
     message = "\nIt's " ++ pl ++ " player's turn\n"
-    pl = if first then "first" else "second"
+    pl = case player' of
+      Maximizer -> "first"
+      Minimizer -> "second"
 
 instance GameState NimGame where
-  firstplayer (Nim (first, _)) = first
-  terminal (Nim (first, piles)) = if null piles then Just (if first then (-1) else 1) else Nothing
-  actions (Nim (first, piles)) = [(movename (n, m), newng n m) | n <- uniq piles, m <- [0..n-1]] where
+  player (Nim (player', _)) = player'
+  terminal (Nim (player', piles)) = if null piles then Just (playerValue player') else Nothing
+  actions (Nim (player', piles)) = [(movename (n, m), newng n m) | n <- uniq piles, m <- [0..n-1]] where
     uniq = Set.toList . Set.fromList
-    newng n m = Nim (not first, filter (/= 0) $ a ++ [m] ++ b) where
+    newng n m = Nim (otherPlayer player', filter (/= 0) $ a ++ [m] ++ b) where
       (a, b) = fmap (drop 1) $ break (n ==) piles
 
 movename :: (Integer, Integer) -> String
@@ -39,7 +41,7 @@ pilemaker _ strs = map read strs
 main = do
   args <- getArgs
   rand <- newStdGen
-  let initial = Nim (True, pilemaker rand args)
+  let initial = Nim (Maximizer, pilemaker rand args)
   putStrLn $ "\n\nWelcome to Nim!"
   putStrLn $ "Take any amount of stones from any pile, last player to move wins!"
   putStrLn $ "To take 'y' stones from a pile of size 'x', type 'x-y'\n\n"

@@ -23,7 +23,9 @@ instance Show BoardState where
       1 -> "Mrs. Cross wins!"
       0 -> "It's a draw!"
       (-1) -> "Mr. Knott wins!"
-    playermessage = if firstplayer gs then "It's Mrs. Cross' turn.\n" else "It's Mr. Knott's turn.\n"
+    playermessage = case player gs of
+      Maximizer -> "It's Mrs. Cross' turn.\n"
+      Minimizer ->  "It's Mr. Knott's turn.\n"
     movemessage = "Possible moves are: " ++ (unwords $ map fst $ actions gs) ++ "\n"
     row n = intersperse ' ' [f $ content A.! (5-n, i) | i <- [0..6]]
     f Ex = 'X'
@@ -34,7 +36,7 @@ movename :: Int -> String
 movename n = ("abcdefg" !! n) : []
 
 instance GameState BoardState where
-  firstplayer = (== 0) . (flip mod 2) . totalmoves
+  player Board {totalmoves} = if mod totalmoves 2 == 0 then Maximizer else Minimizer
   terminal = terminal'
   actions !gs@(Board {heights}) = [(movename n, mkState gs n) | n <- [0..6], (heights A.! n) < 6]
   numactions = numactions'
@@ -63,10 +65,10 @@ isWinner (!Board {content, heights}) !player !col =
 mkState :: BoardState -> Int -> BoardState
 mkState !gs@(Board {content, heights, totalmoves, numactions'}) !col =
   Board {content=con', heights=hei', totalmoves=tot', numactions'=num', terminal'=ter'} where
-    !first = firstplayer gs
-    !sqrtype = if first then Ex else Oh
+    (!sqrtype, !winval) = case mod totalmoves 2 of
+      0 -> (Ex, Just 1)
+      1 -> (Oh, Just (-1))
     !height = heights A.! col
-    !winval = Just $! if first then 1 else -1
     !draw = totalmoves == 41
     !tot' = totalmoves + 1
     !con' = content A.// [((height, col), sqrtype)]
@@ -82,10 +84,11 @@ initial = Board {content = A.listArray ((0,0), (5, 6)) $ repeat None,
                  terminal' = Nothing,
                  numactions' = 7}
 
-mymctssolver = mctsSolver defaultMCParams
+mymctssolver = mctsSolver defaultMCParams {background=True}
 
 
-main = putStrLn "" >> humanInteraction initial mymctssolver
+-- main = putStrLn "" >> humanInteraction initial mymctssolver
+main = putStrLn "\n\n\n" >> interaction initial mymctssolver mymctssolver >> main
 
 -- main = do
 --   x <- multitimed initial 2500

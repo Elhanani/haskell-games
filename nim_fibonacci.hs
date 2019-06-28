@@ -6,28 +6,28 @@ import Data.Ratio
 import System.Environment
 import System.Random
 
-data NimGame = Nim {first :: Bool,
+data NimGame = Nim {player' :: Player,
                     limit :: Integer,
                     pile :: Integer} deriving Eq
 
 instance Show NimGame where
-  show (Nim {first = False, pile = 0}) = "Second player has no more moves.\nFirst player wins!"
-  show (Nim {first = True, pile = 0}) = "First player has no more moves.\nSecond player wins!"
-  show (Nim {limit, pile, first}) = pilestr ++ playerstr ++ movestr where
+  show (Nim {player' = Maximizer, pile = 0}) = "Second player has no more moves.\nFirst player wins!"
+  show (Nim {player' = Minimizer, pile = 0}) = "First player has no more moves.\nSecond player wins!"
+  show (Nim {limit, pile, player'}) = pilestr ++ playerstr ++ movestr where
     pilestr = "There are " ++ (show pile) ++ " stones in the pile.\n"
     movestr = if limit < pile
       then "You can take at most " ++ (show limit) ++ " of them...\n"
       else "You can take as many of them as you'd like!\n"
-    playerstr = if first
-      then "First player's turn to make a move.\n"
-      else "Second player's turn to make a move.\n"
+    playerstr = case player' of
+      Maximizer -> "First player's turn to make a move.\n"
+      Minimizer -> "Second player's turn to make a move.\n"
 
 instance GameState NimGame where
-  firstplayer = first
-  terminal (Nim {first, pile = 0}) = Just $ if first then (-1) else 1
+  player = player'
+  terminal (Nim {player', pile = 0}) = Just $ playerValue player'
   terminal _ = Nothing
-  actions (Nim {first, pile, limit}) = [(show n, newnim n) | n <- [1..limit]] where
-    newnim n = Nim {first = not first, pile = pile-n, limit = min (pile-n) (2*n)}
+  actions (Nim {player', pile, limit}) = [(show n, newnim n) | n <- [1..limit]] where
+    newnim n = Nim {player' = otherPlayer player', pile = pile-n, limit = min (pile-n) (2*n)}
 
 fibonacci :: [Integer]
 fibonacci = 0 : 1 : zipWith (+) fibonacci (tail fibonacci)
@@ -55,7 +55,7 @@ nimsolver2 (Nim {pile = p, limit = l}) = if null wins then "1" else show $ head 
   isgood n = (last $ zeckendorf $ p-n) > 2*n
 
 initial :: Integer -> NimGame
-initial p = Nim {first = True, limit = p-1, pile = p}
+initial p = Nim {player' = Maximizer, limit = p-1, pile = p}
 
 boundary :: [Integer] -> [Integer]
 boundary [] = boundary [100]

@@ -19,8 +19,8 @@ instance Show LimitInitialMoves where
   show !(NoLimitInitialMoves !gs) = show gs
 
 instance GameState LimitInitialMoves where
-  firstplayer !(LimitInitialMoves (!gs, _)) = firstplayer gs
-  firstplayer !(NoLimitInitialMoves !gs) = firstplayer gs
+  player !(LimitInitialMoves (!gs, _)) = player gs
+  player !(NoLimitInitialMoves !gs) = player gs
   terminal !(LimitInitialMoves (!gs, _)) = terminal gs
   terminal !(NoLimitInitialMoves !gs) = terminal gs
   actions !(NoLimitInitialMoves !gs) = map mf $ actions gs where

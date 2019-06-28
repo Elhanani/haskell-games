@@ -8,10 +8,17 @@ import Data.List
 import System.Random
 
 -- Improvements:
+-- 0. Consolidate alphabeta and chAlphabeta
 -- 1. Memoizations
 -- 2. Node heuristics
 
 type ABValue = (Value, Value)
+
+data ABParams gs = ABParams {alpha :: {-# UNPACK #-} !Value, beta :: {-# UNPACK #-} !Value,
+                             chooser :: Maybe (ChoiceHeuristic gs)}
+
+defaultABParams :: forall gs. (GameState gs) => ABParams gs
+defaultABParams = ABParams {alpha = -1, beta = 1, chooser = Nothing}
 
 type ChoiceHeuristic gs = gs -> String -> Value
 
@@ -27,7 +34,7 @@ instance Show ABSolvedGame where
   show (ABSolvedGame {gameState}) = show gameState
 
 instance GameState ABSolvedGame where
-  firstplayer (ABSolvedGame {gameState}) = firstplayer gameState
+  player (ABSolvedGame {gameState}) = player gameState
   terminal (ABSolvedGame {gameState}) = terminal gameState
   maxdepth (ABSolvedGame {gameState}) = maxdepth gameState
   actions = actions'
@@ -56,9 +63,9 @@ alphabetaSolver !ab !gameState = ABSolvedGame {gameState, actions', abvalue = ab
     alphabetize [(_, ns)] !ab' = abvalue ns ab'
     alphabetize !(x:xs) !(a, b) = let
       !kidval = abvalue (snd x) (a, b)
-      in if a >= b then kidval else if firstplayer gameState
-        then max kidval $ alphabetize xs (max a kidval, b)
-        else min kidval $ alphabetize xs (a, min b kidval)
+      in if a >= b then kidval else case player gameState of
+        Maximizer -> max kidval $ alphabetize xs (max a kidval, b)
+        Minimizer -> min kidval $ alphabetize xs (a, min b kidval)
 
 chAlphabetaSolver :: (GameState a) => ChoiceHeuristic a -> ABValue -> a -> ABSolvedGame
 chAlphabetaSolver !chooser !ab !gameState = ABSolvedGame {gameState, actions', abvalue = abval, value} where
@@ -70,9 +77,9 @@ chAlphabetaSolver !chooser !ab !gameState = ABSolvedGame {gameState, actions', a
     alphabetize [(_, ns)] !ab' = abvalue ns ab'
     alphabetize !(x:xs) !(a, b) = let
       !kidval = abvalue (snd x) (a, b)
-      in if a >= b then kidval else if firstplayer gameState
-        then max kidval $ alphabetize xs (max a kidval, b)
-        else min kidval $ alphabetize xs (a, min b kidval)
+      in if a >= b then kidval else case player gameState of
+        Maximizer -> max kidval $ alphabetize xs (max a kidval, b)
+        Minimizer -> min kidval $ alphabetize xs (a, min b kidval)
 
 
 -- memo should not be hard - we just figure out when we can be sure of the value

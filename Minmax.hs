@@ -14,7 +14,7 @@ instance Show MMSolvedGame where
   show (MMSolvedGame {gameState}) = show gameState
 
 instance GameState MMSolvedGame where
-  firstplayer (MMSolvedGame {gameState}) = firstplayer gameState
+  player (MMSolvedGame {gameState}) = player gameState
   terminal (MMSolvedGame {gameState}) = terminal gameState
   maxdepth (MMSolvedGame {gameState}) = maxdepth gameState
   actions = actions'
@@ -27,7 +27,7 @@ minmaxSolver gameState = MMSolvedGame {gameState, value = value', actions'} wher
   internal (str, ngs) = (str, minmaxSolver ngs)
   actions' = map internal $ actions gameState
   tval = terminal gameState
-  objective = if firstplayer gameState then maximum else minimum
+  objective = playerObjective $! player gameState
   value' = if isJust $ tval then fromJust tval else
     objective $ map (value . snd) $ actions'
 
@@ -40,7 +40,7 @@ memominmax gameState = do
       then return MMSolvedGame {gameState, value = fromJust tval, actions' = []} else do
         actions' <- mapM internal $ actions gameState
         memo2 <- get
-        let objective = if firstplayer gameState then maximum else minimum
+        let objective = playerObjective $! player gameState
             cval = objective $ map (value . snd) $ actions'
             ngs = MMSolvedGame {gameState, value = cval, actions'}
         put $ M.insert gameState ngs memo2

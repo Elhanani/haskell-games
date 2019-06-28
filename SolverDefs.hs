@@ -4,7 +4,8 @@
            , BangPatterns
              #-}
 
-module SolverDefs (Value, GameState(..), SolvedGameState(..),
+module SolverDefs (Value, GameState(..), SolvedGameState(..), Player(..),
+                   playerValue, playerObjective, otherPlayer,
                    randomAction, statelessSolver, randomSolver, humanSolver,
                    interaction, humanInteraction) where
 
@@ -12,10 +13,26 @@ import System.Random
 import System.IO
 import Data.Maybe
 
+-- improvements:
+-- 1. Allow games with chance nodes (backgammon?)
+
 type Value = Double
+data Player = Maximizer | Minimizer deriving (Eq, Ord) --
+
+playerValue :: Player -> Value
+playerValue Maximizer = 1
+playerValue Minimizer = -1
+
+playerObjective :: (Foldable t, Ord a) => Player -> t a -> a
+playerObjective Maximizer = maximum
+playerObjective Minimizer = minimum
+
+otherPlayer :: Player -> Player
+otherPlayer Maximizer = Minimizer
+otherPlayer Minimizer = Maximizer
 
 class (Show gs) => GameState gs where
-  firstplayer :: gs -> Bool
+  player :: gs -> Player
   terminal :: gs -> Maybe Value
   actions :: gs -> [(String, gs)]
   numactions :: gs -> Int
@@ -45,7 +62,7 @@ instance Show StatelessSolvedGame where
   show (StatelessSolvedGame {gameState}) = show gameState
 
 instance GameState StatelessSolvedGame where
-  firstplayer (StatelessSolvedGame {gameState}) = firstplayer gameState
+  player (StatelessSolvedGame {gameState}) = player gameState
   terminal (StatelessSolvedGame {gameState}) = terminal gameState
   actions = actions'
 

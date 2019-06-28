@@ -16,7 +16,7 @@ type Miniboard = A.Array Int Square
 type MiniPlus = Either Square (Int, Miniboard)
 type Bigboard = A.Array Int MiniPlus
 
-newtype BoardState = Board (Bool, Bigboard, Maybe Int, Maybe Value) deriving (Eq, Ord)
+newtype BoardState = Board (Player, Bigboard, Maybe Int, Maybe Value) deriving (Eq, Ord)
 
 miniShow :: Bool -> MiniPlus -> [String]
 miniShow _ (Left Ex) = ["\\ /", " X ", "/ \\"]
@@ -45,7 +45,9 @@ instance Show BoardState where
       1 -> "Mrs. Cross wins!"
       0 -> "It's a draw!"
       (-1) -> "Mr. Knott wins!"
-    playermessage = if firstplayer gs then "It's Mrs. Cross' turn.\n" else "It's Mr. Knot's turn.\n"
+    playermessage = case player gs of
+      Maximizer -> "It's Mrs. Cross' turn.\n"
+      Minimizer -> "It's Mr. Knot's turn.\n"
     movemessage = "Possible moves are " ++ (unwords $ map fst $ actions gs) ++ "\n"
 
 movename :: (Int, Int) -> String
@@ -54,7 +56,7 @@ movename !(a, b) = [x, y] where
   y = ("123456789" !!) $ 3*(quot a 3) + (quot b 3)
 
 instance GameState BoardState where
-  firstplayer !(Board (!first, _, _, _)) = first
+  player !(Board (!player', _, _, _)) = player'
   terminal !(Board (_, _, _, !v)) = v
   actions !gs@(Board (_, _, Just !pos, _)) = miniActions gs $! pos
   actions !gs@(Board (_, !bb, Nothing, _)) = concatMap (miniActions gs) [0..8]
@@ -89,9 +91,11 @@ miniActions !gs@(Board (_, !bb, _, _)) x =
     internal !y = (movename (x, y), mkState gs x y)
 
 mkState :: BoardState -> Int -> Int -> BoardState
-mkState !gs@(Board (!first, !bb, _, _)) !x !y = Board (not first, nbb, nextpos, terminal) where
+mkState !gs@(Board (!player', !bb, _, _)) !x !y = Board (otherPlayer player', nbb, nextpos, terminal) where
     !(!cnt, !rbbx) = fromRight undefined $! bb A.! x
-    !sqrtype = if first then Ex else Oh
+    !sqrtype = case player' of
+      Maximizer -> Ex
+      Minimizer -> Oh
     !winner = cnt > 2 && isMiniWinner sqrtype y rbbx
     !draw = cnt == 8
     !nmb = if winner then Left sqrtype else
@@ -102,12 +106,12 @@ mkState !gs@(Board (!first, !bb, _, _)) !x !y = Board (not first, nbb, nextpos, 
     bigdraw = all isLeft $ A.elems nbb
     !terminal = if winner then
       if bigwinner
-        then if first then Just 1 else Just (-1)
+        then Just $! playerValue $! player'
         else if bigdraw then Just 0 else Nothing
       else if draw && bigdraw then Just 0 else Nothing
 
 initial :: BoardState
-initial = Board (True, array8 $ Right $ (0, array8 None), Nothing, Nothing) where
+initial = Board (Maximizer, array8 $ Right $ (0, array8 None), Nothing, Nothing) where
   array8 x = A.listArray (0, 8) $ repeat x
 
 
@@ -124,9 +128,11 @@ symmetries = [["e5"], ["d4", "f4", "d6", "f6"], ["e4", "d5", "f5", "e6"],
 
 -- main = putStrLn "\n" >> interaction initial randomSolver randomSolver
 
-mymctssolver1 = mctsSolver defaultMCParams
+mymctssolver = mctsSolver defaultMCParams {background=False}
 
-main = putStrLn " ">> humanInteraction initial mymctssolver1
+-- main = putStrLn " ">> humanInteraction initial mymctssolver1
+
+main = putStrLn "\n\n\n" >> interaction initial mymctssolver mymctssolver >> main
 
 
 -- main = do
