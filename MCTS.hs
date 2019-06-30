@@ -10,9 +10,9 @@ import Data.List
 import Control.Concurrent.Async
 import Control.Concurrent.MVar
 import qualified PQueueQuick as PQ
-
 import System.IO
 
+import Debug.Trace
 
 data MCSolvedGame = forall gs. (GameState gs) =>
     MCSolvedGame {gameState :: gs,
@@ -46,8 +46,8 @@ defaultMCParams = MCParams {evalfunc = ucb1 2, alpha = (-1), beta = 1,
                             uniform = False}
 
 playerBound :: Player -> MCParams -> Value
-playerBound Maximizer = alpha
-playerBound Minimizer = beta
+playerBound Maximizer = beta
+playerBound Minimizer = alpha
 
 playerObjectiveBy :: (Foldable t) => Player -> (a -> a -> Ordering) -> t a -> a
 playerObjectiveBy Maximizer = maximumBy
@@ -72,10 +72,13 @@ instance SolvedGameState MCSolvedGame where
       snd $ unMCAction $ head $ filter ((==v) . fst . unMCAction) terminals
     best (MCSolvedGame {children = Trunk (nonterminals, _)}) =
       snd $ unMCAction $ objective f $ PQ.toAscList nonterminals
+    best (MCSolvedGame {children = Bud (val, ready, unready)}) =
+      traceShow (val, length ready, length unready) undefined
     f (MCAction (_, (_, MCSolvedGame {wins=w1, simulations=s1})))
       (MCAction (_, (_, MCSolvedGame {wins=w2, simulations=s2}))) =
         compare (w1/s1) (w2/s2)
     objective = playerObjectiveBy $! player mgs
+
   think = advanceuntil
 
 mkLeaf :: (GameState gs, RandomGen rg) => MCParams -> rg -> gs -> (MCSolvedGame, rg)
@@ -146,6 +149,10 @@ timedadvance mgs = do
   --     persec = (sims2-sims1) / denom
   -- putStr "Performance: "
   -- print ((sims1, sims2, denom), persec)
+  -- putStrLn $ case children res of
+  --   Terminal (x, _) -> ("Terminal " ++ show x)
+  --   Trunk (x, y) ->  ("Trunk " ++ show (length $ PQ.toAscList x, length y))
+  --   Bud (v, x, y) -> ("Bud " ++ show (v, length x, length y))
   -- return res
 
 multiadvance :: (RandomGen rg) => Int -> MCSolvedGame -> rg -> MCSolvedGame
@@ -180,7 +187,7 @@ advanceNode !mgs@(MCSolvedGame {simulations=s, wins=w, gameState,
     !s' = s+1
     (!child', !rand', !val) = advanceNode child rand
     !children' = case child' of
-      MCSolvedGame {children = (Terminal (tval, _))} -> if tval == playerValue player'
+      MCSolvedGame {children = (Terminal (tval, _))} -> if tval == playerBound player' p
         then Terminal (tval, (MCAction (tval, (str, child')):terminals) ++ PQ.toAscList queue)
         else Trunk (queue, MCAction (tval, (str, child')):terminals)
       otherwise -> Trunk (PQ.insert nact queue, terminals) where
