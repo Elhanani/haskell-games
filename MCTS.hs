@@ -10,10 +10,9 @@ import Data.List
 import Data.Ord
 import Control.Concurrent.Async
 import Control.Concurrent.MVar
-import qualified PQueueQuick as PQ
 import System.IO
-
-import Debug.Trace
+import qualified PQueueQuick as PQ
+import qualified Data.Map as M
 
 -- | exploration/expolitation are coefficients for the UCB funtion
 --   alpha, beta are values that will stop the search
@@ -60,7 +59,7 @@ defaultMCParams :: MCParams
 defaultMCParams = MCParams {exploitation = 1, exploration = sqrt 2,
                             alpha = (-1), beta = 1,
                             duration = 1000, maxsim = 100000000, background = True,
-                            numrollsI = 1, numrollsF = 1, simsperroll = 100000,
+                            numrollsI = 1, numrollsF = 1, simsperroll = 1000000,
                             uniform = False}
 
 playerBound :: Player -> MCParams -> Value
@@ -88,23 +87,20 @@ instance GameState MCSolvedGame where
   maxdepth MCSolvedGame {mcNode = MCNode {gameState}} = maxdepth gameState
   actions MCSolvedGame {mcParams, mcNode = MCNode {children}} =
     map mkSolvedGame $ mkActions children where
-      mkActions :: MCActions -> [MCAction]
-      mkActions (Terminal (_, xs)) = xs
-      mkActions (Trunk (xs, ys)) = ys ++ (map action' $ PQ.toAscList xs)
-      mkActions (Bud (solved, unsolved)) = solved ++ (map f unsolved) where
-        f (str, gs) = (str, mkLeaf gs)
       mkSolvedGame (str, mcNode) = (str, MCSolvedGame {mcParams, mcNode})
 
 instance SolvedGameState MCSolvedGame where
-  action mcsg@(MCSolvedGame {mcParams, mcNode = MCNode {gameState}}) =
-    (best . mcNode) <$> timedadvance mcsg where
+  action (MCSolvedGame {mcParams, mcNode = node@(MCNode {gameState})}) =
+    best <$> timedadvance mcParams node where
       best (MCNode {children = Terminal (v, terminals)}) = toMCSolvedGame $
         head $ filter ((== Just v) . terminalVal . snd) terminals
       best (MCNode {children = Trunk (nonterminals, _)}) = toMCSolvedGame $
         action' $ objective (comparing $! winRate . snd . action') $ PQ.toAscList nonterminals
       objective = playerObjectiveBy $! player gameState
       toMCSolvedGame (str, mcNode) = (str, MCSolvedGame {mcParams, mcNode})
-  think = advanceuntil
+  think (MCSolvedGame {mcParams, mcNode}) = do
+    newnode <- advanceuntil mcParams mcNode
+    return $ (\mcNode -> MCSolvedGame {mcParams, mcNode}) <$> newnode
 
 -- | Perform rollouts and update the node
 rolloutNode :: RandomGen rg => Int -> MCNode -> rg -> (MCNode, rg)
@@ -113,6 +109,14 @@ rolloutNode !n !mcNode@(MCNode {gameState = gs}) !rand = (mcNode', rand') where
   !mcNode' = mcNode {simulations = (simulations mcNode) + sqrtn,
                      wins = (wins mcNode) + (w/sqrtn)}
   (!w, !rand') = rollouts n gs rand
+
+-- | Get actions from actions types
+mkActions :: MCActions -> [MCAction]
+mkActions (Terminal (_, xs)) = xs
+mkActions (Trunk (xs, ys)) = ys ++ (map action' $ PQ.toAscList xs)
+mkActions (Bud (solved, unsolved)) = solved ++ (map f unsolved) where
+  f (str, gs) = (str, mkLeaf gs)
+
 
 -- | Creates a new leaf for the game (a node that has no children)
 mkLeaf :: GameState gs => gs -> MCNode
@@ -143,52 +147,50 @@ mkTrunk !player !params@(MCParams{exploration, exploitation}) !totalsims !xs =
       then Terminal (testval, xs ++ ys)
       else Trunk (PQ.fromList $ map evalfunc xs, ys)
 
-
--- change the simsperroll inside the internal loop
 -- | Advances until the resulting function is called
-advanceuntil :: MCSolvedGame -> IO (IO MCSolvedGame)
-advanceuntil mcsg@(MCSolvedGame {mcNode, mcParams}) = if background $ mcParams then do
+advanceuntil :: MCParams -> MCNode -> IO (IO MCNode)
+advanceuntil params node = if background $ params then do
   mfinish <- newMVar False
-  let maxsim' = fromIntegral $ maxsim $ mcParams
+  let maxsim' = fromIntegral $ maxsim $ params
       internal cgs = do
-        let newrolls = floor ((simulations cgs) / (simsperroll mcParams)) + numrollsI mcParams
-            params' = mcParams {uniform=True, numrollsI = newrolls, numrollsF = fromIntegral newrolls}
+        let newrolls = floor ((simulations cgs) / (simsperroll params)) + numrollsI params
+            params' = params {uniform=True, numrollsI = newrolls, numrollsF = fromIntegral newrolls}
         hFlush stdout
         rand <- newStdGen
         finish <- readMVar mfinish
         if finish || simulations cgs > maxsim'
-          then return mcsg {mcNode=cgs}
+          then return cgs
           else
             internal $! multiadvance params' 100 cgs rand
-  solver <- async $ internal mcNode
+  solver <- async $ internal node
   return $ do
     swapMVar mfinish True
     wait solver
-  else return $ return mcsg
+  else return $ return node
 
--- change the simsperroll inside the internal loop
 -- | Advances until time runs out
-timedadvance :: MCSolvedGame -> IO MCSolvedGame
-timedadvance mcsg@(MCSolvedGame {mcNode, mcParams}) = do
+timedadvance :: MCParams -> MCNode -> IO MCNode
+timedadvance params node = do
   !t <- getCurrentTime
-  let maxsim' = fromIntegral $ maxsim $ mcParams
-      !st = addUTCTime ((fromIntegral (duration $ mcParams))/1000) t
+  let maxsim' = fromIntegral $ maxsim $ params
+      !st = addUTCTime ((fromIntegral (duration $ params))/1000) t
       internal cgs = do
-        let newrolls = floor ((simulations cgs) / (simsperroll mcParams)) + numrollsI mcParams
-            params' = mcParams {numrollsI = newrolls, numrollsF = fromIntegral newrolls}
+        let newrolls = floor ((simulations cgs) / (simsperroll params)) + numrollsI params
+            params' = params {numrollsI = newrolls, numrollsF = fromIntegral newrolls}
         !ct <- getCurrentTime
         !rand <- newStdGen
         if ct > st || stopcond cgs then return cgs else internal $! multiadvance params' 100 cgs rand
       stopcond (MCNode {children = !(Terminal _)}) = True
       stopcond (MCNode {simulations}) = simulations > maxsim'
-  res <- internal mcNode
-  -- let sims1 = simulations mcNode
+  internal node
+  -- res <- internal node
+  -- let sims1 = simulations node
   --     sims2 = simulations res
-  --     denom = (fromIntegral $ duration $ mcParams)/1000
+  --     denom = (fromIntegral $ duration $ params)/1000
   --     persec = (sims2-sims1) / denom
   -- putStr "Performance: "
   -- print ((sims1, sims2, denom), persec)
-  return mcsg {mcNode = res}
+  -- return res
 
 -- | Perform several advances
 multiadvance :: (RandomGen rg) => MCParams -> Int -> MCNode -> rg -> MCNode
@@ -260,36 +262,50 @@ rollouts !n !gs !rand1 = (v + w, rand3) where
 mctsSolver :: GameState a => MCParams -> a -> MCSolvedGame
 mctsSolver mcParams gs = MCSolvedGame {mcParams, mcNode = mkLeaf gs}
 
-combineMCTS :: [MCSolvedGame] -> [(String, MCSolvedGame)]
-combineMCTS = undefined
+data MTMCSolvedGame = MTMCSolvedGame {mtNodes :: [MCNode], mtParams :: MCParams}
 
+instance Show MTMCSolvedGame where
+  show MTMCSolvedGame {mtNodes = (MCNode {gameState}):_} = show gameState
 
+instance GameState MTMCSolvedGame where
+  player MTMCSolvedGame {mtNodes = (MCNode {gameState}):_} = player gameState
+  terminal MTMCSolvedGame {mtNodes = (MCNode {gameState}):_} = terminal gameState
+  maxdepth MTMCSolvedGame {mtNodes = (MCNode {gameState}):_} = maxdepth gameState
+  actions MTMCSolvedGame {mtParams, mtNodes} = map mkSolvedGame $ M.toList solutions where
+    solutions = foldr addthread M.empty mtNodes
+    addthread node table = foldr appendaction table $ mkActions $ children node
+    appendaction (str, node) = M.alter (appendnode node) str
+    appendnode node Nothing = Just [node]
+    appendnode node (Just nodes) = Just $ node:nodes
+    mkSolvedGame (str, mtNodes) = (str, MTMCSolvedGame {mtParams, mtNodes})
 
+instance SolvedGameState MTMCSolvedGame where
+  action (MTMCSolvedGame {mtParams, mtNodes}) =
+    best <$> mapConcurrently (timedadvance mtParams) mtNodes where
+      best nodes = (beststr, MTMCSolvedGame {mtParams, mtNodes = multiact beststr}) where
+        multiactions = map (mkActions . children) nodes
+        beststr = fst $ objective (comparing snd) $ M.toList solutions
+        solutions :: M.Map String Value -- probably better to change Value to NodeValue
+        solutions = foldr addthread M.empty multiactions
+        addthread actionlist table = foldr aggaction table actionlist
+        aggaction (str, node) = M.alter (aggnode node) str
+        aggnode node Nothing = undefined
+        aggnode node preval = undefined
+        multiact str = map (fromJust . lookup str) multiactions
+      -- (best . mcNode) <$> timedadvance mcsg where
+      -- best (MCNode {children = Terminal (v, terminals)}) = toMCSolvedGame $
+      --   head $ filter ((== Just v) . terminalVal . snd) terminals
+      -- best (MCNode {children = Trunk (nonterminals, _)}) = toMCSolvedGame $
+      --   action' $ objective (comparing $! winRate . snd . action') $ PQ.toAscList nonterminals
+      mcplayer (MCNode {gameState}) = player gameState
+      objective = playerObjectiveBy $! mcplayer $ head mtNodes
+      -- toMCSolvedGame (str, mcNode) = (str, MCSolvedGame {mcParams, mcNode})
+  think (MTMCSolvedGame {mtParams, mtNodes}) = do
+    funcs <- mapM (advanceuntil mtParams) mtNodes
+    return $ do
+      mtNodes <- sequence funcs
+      return MTMCSolvedGame {mtParams, mtNodes}
 
-
--- For performace measuring only!
-
-timedrollouts :: (GameState a) => a -> UTCTime -> IO (Value, Int)
-timedrollouts gs st = do
-  let inc = 100
-      runtil (val, attempts) = do
-        !rand <- newStdGen
-        let !cval = val + (fst $ rollouts inc gs rand)
-            !cattempts = attempts + inc
-        t <- getCurrentTime
-        if t > st then return (cval, cattempts) else runtil (cval, cattempts)
-  ret <- runtil (0, 0)
-  return ret
-
-multitimed :: (GameState a) => a -> Int -> IO [(Value, Int)]
-multitimed gs dur = do
-  t <- getCurrentTime
-  -- n <- getNumCapabilities
-  let st = addUTCTime ((fromIntegral dur)/1000) t
-  mapConcurrently (const $ timedrollouts gs st) [1..2] -- [1..4] [1..n-1]
-
-singlemed :: (GameState a) => a -> Int -> IO (Value, Int)
-singlemed gs dur = do
-  t <- getCurrentTime
-  let st = addUTCTime ((fromIntegral dur)/1000) t
-  timedrollouts gs st
+-- | Solve a game with Multithreaded MCTS
+mtmctsSolver :: GameState a => Int -> MCParams -> a -> MTMCSolvedGame
+mtmctsSolver n mtParams gs = MTMCSolvedGame {mtParams, mtNodes = map mkLeaf $ replicate n gs}
