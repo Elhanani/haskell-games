@@ -20,12 +20,16 @@ import qualified Data.Map as M
 --   maxsim is the maximum count of simulations
 --   background is True when we allow thinking in the background
 --   uniform is True when we want to explore and not to exploit only for the first node
+--   numrolls is the number of rollouts per leaf
+--   simsperroll is the rate of increase of the rollouts per leaf per root simulations
+--   inert is when we do not want to propagate terminals
 data MCParams = MCParams
   {exploitation :: {-# UNPACK #-} !Value, exploration :: {-# UNPACK #-} !Value,
    alpha :: {-# UNPACK #-} !Value, beta :: {-# UNPACK #-} !Value,
    duration ::  {-# UNPACK #-} !Int, maxsim :: {-# UNPACK #-} !Int,
-   numrollsI :: {-# UNPACK #-} !Int, numrollsF :: {-# UNPACK #-} !Value,
-   simsperroll :: {-# UNPACK #-} !Value, background :: !Bool, uniform :: !Bool}
+   numrollsI :: {-# UNPACK #-} !Int, numrollsSqrt :: {-# UNPACK #-} !Value,
+   simsperroll :: {-# UNPACK #-} !Value,
+   background :: !Bool, uniform :: !Bool, inert :: !Bool}
 
 data MCSolvedGame = MCSolvedGame {mcNode :: MCNode, mcParams :: MCParams}
 
@@ -54,13 +58,14 @@ instance Ord PrioAction where
 data MCActions = Terminal (Value, [MCAction])
                | forall gs. GameState gs => Bud ([MCAction], [(String, gs)])
                | Trunk (PQ.PQueue PrioAction, [MCAction])
+               | InertTerminal Value
 
 defaultMCParams :: MCParams
 defaultMCParams = MCParams {exploitation = 1, exploration = sqrt 2,
                             alpha = (-1), beta = 1,
                             duration = 1000, maxsim = 100000000, background = True,
-                            numrollsI = 1, numrollsF = 1, simsperroll = 1000000,
-                            uniform = False}
+                            numrollsI = 1, numrollsSqrt = 1, simsperroll = 1000000,
+                            uniform = False, inert = False}
 
 playerBound :: Player -> MCParams -> Value
 playerBound Maximizer = beta
@@ -93,7 +98,7 @@ instance SolvedGameState MCSolvedGame where
   action (MCSolvedGame {mcParams, mcNode = node@(MCNode {gameState})}) =
     best <$> timedadvance mcParams node where
       best (MCNode {children = Terminal (v, terminals)}) = toMCSolvedGame $
-        head $ filter ((== Just v) . terminalVal . snd) terminals
+        head $ filter ((== Just v) . terminalVal . snd) terminals -- should be changed to lessevil
       best (MCNode {children = Trunk (nonterminals, _)}) = toMCSolvedGame $
         action' $ objective (comparing $! winRate . snd . action') $ PQ.toAscList nonterminals
       objective = playerObjectiveBy $! player gameState
@@ -112,20 +117,23 @@ rolloutNode !n !mcNode@(MCNode {gameState = gs}) !rand = (mcNode', rand') where
 
 -- | Get actions from actions types
 mkActions :: MCActions -> [MCAction]
+mkActions (InertTerminal _) = []
 mkActions (Terminal (_, xs)) = xs
 mkActions (Trunk (xs, ys)) = ys ++ (map action' $ PQ.toAscList xs)
 mkActions (Bud (solved, unsolved)) = solved ++ (map f unsolved) where
-  f (str, gs) = (str, mkLeaf gs)
+  f (str, gs) = (str, mkLeaf False gs)
 
 
 -- | Creates a new leaf for the game (a node that has no children)
-mkLeaf :: GameState gs => gs -> MCNode
-mkLeaf !gameState = MCNode {gameState, simulations, wins, children} where
+mkLeaf :: GameState gs => Bool -> gs -> MCNode
+mkLeaf !inert' !gameState = MCNode {gameState, simulations, wins, children} where
   !maybeval = terminal gameState
   !simulations = 0
   !wins = 0
   !children = if isJust $! maybeval
-    then Terminal (fromJust maybeval, [])
+    then if inert'
+      then InertTerminal $ fromJust maybeval
+      else Terminal (fromJust maybeval, [])
     else Bud ([], actions $! gameState)
 
 -- | Makes a trunk out of a completed bud
@@ -154,7 +162,8 @@ advanceuntil params node = if background $ params then do
   let maxsim' = fromIntegral $ maxsim $ params
       internal cgs = do
         let newrolls = floor ((simulations cgs) / (simsperroll params)) + numrollsI params
-            params' = params {uniform=True, numrollsI = newrolls, numrollsF = fromIntegral newrolls}
+            params' = params {uniform=True, numrollsI = newrolls,
+                              numrollsSqrt = sqrt $! fromIntegral newrolls}
         hFlush stdout
         rand <- newStdGen
         finish <- readMVar mfinish
@@ -176,7 +185,7 @@ timedadvance params node = do
       !st = addUTCTime ((fromIntegral (duration $ params))/1000) t
       internal cgs = do
         let newrolls = floor ((simulations cgs) / (simsperroll params)) + numrollsI params
-            params' = params {numrollsI = newrolls, numrollsF = fromIntegral newrolls}
+            params' = params {numrollsI = newrolls, numrollsSqrt = sqrt $! fromIntegral newrolls}
         !ct <- getCurrentTime
         !rand <- newStdGen
         if ct > st || stopcond cgs then return cgs else internal $! multiadvance params' 100 cgs rand
@@ -200,23 +209,26 @@ multiadvance !params !n !gs !rand  = fst $ (iterate f (gs, rand)) !! n where
 
 -- | Advance a node to improve heuristic
 advanceNode :: (RandomGen rg) => MCParams -> MCNode -> rg -> (MCNode, rg, Value)
-advanceNode _ !mgs@(MCNode {children = (Terminal (!tval, _))}) !rand = (mgs, rand, tval)
-advanceNode !params@(MCParams {numrollsI, numrollsF})
+advanceNode !(MCParams {numrollsSqrt})
+            !mgs@(MCNode {children = (Terminal (!tval, _))}) !rand = (mgs, rand, tval*numrollsSqrt)
+advanceNode !(MCParams {numrollsSqrt})
+            !mgs@(MCNode {children = (InertTerminal !tval)}) !rand = (mgs, rand, tval*numrollsSqrt)
+advanceNode !params@(MCParams {numrollsI, numrollsSqrt, inert})
             !mgs@(MCNode {simulations, wins=w, gameState,
                           children = (Bud (!post, !pre))}) rand =
   (mgs {simulations=simulations', wins = w+val, children = f children'}, rand', val) where
-    !simulations' = simulations+numrollsF
+    !simulations' = simulations+numrollsSqrt
     !(!str, !gs) = head pre
-    !(!ngs, !rand') = rolloutNode numrollsI (mkLeaf gs) rand
+    !(!ngs, !rand') = rolloutNode numrollsI (mkLeaf inert gs) rand
     !val = wins ngs
     !player' = player gameState
     !testval = playerBound player' params
     !children' = Bud ((str, ngs) : post, tail pre)
     f !(Bud (!post', [])) = mkTrunk player' params simulations' post'
     f !bud@(Bud (!post', pre')) = if terminalVal ngs == Just testval
-      then Terminal (testval, post' ++ map (\(!str, !g) -> (str, mkLeaf g)) pre')
+      then Terminal (testval, post' ++ map (\(!str, !g) -> (str, mkLeaf False g)) pre')
       else bud
-advanceNode !params@(MCParams{numrollsF, exploration, exploitation, uniform})
+advanceNode !params@(MCParams{numrollsSqrt, exploration, exploitation, uniform})
             !mgs@(MCNode {simulations=s, wins=w, gameState,
                           children = !(Trunk (!nonterminals, !terminals))}) !rand =
   (mgs {simulations = s', wins = w+val, children = f children'}, rand', val) where
@@ -226,7 +238,7 @@ advanceNode !params@(MCParams{numrollsF, exploration, exploitation, uniform})
     !exploitation' = if uniform then 0 else exploitation
     !player' = player gameState
     !objective = playerObjective player'
-    !s' = s + numrollsF
+    !s' = s + numrollsSqrt
     (!child', !rand', !val) = advanceNode params' child rand
     !nact = (str, child')
     !children' = case child' of
@@ -236,7 +248,7 @@ advanceNode !params@(MCParams{numrollsF, exploration, exploitation, uniform})
       otherwise -> Trunk (PQ.insert nprio queue, terminals) where
         !priority = exploitation*(playerValue player')*(winRate child') +
                     exploration*sqrt((log s)/ss')
-        !nprio = PrioAction {priority, action'=nact, subsims = ss' + numrollsF}
+        !nprio = PrioAction {priority, action'=nact, subsims = ss' + numrollsSqrt}
     f ch@(Trunk (!q', nt')) = if isNothing $! PQ.extract q'
       then Terminal (objective $ map (fromJust . terminalVal . snd) nt', nt')
       else ch
@@ -260,7 +272,7 @@ rollouts !n !gs !rand1 = (v + w, rand3) where
 
 -- | Solve a game with MCTS
 mctsSolver :: GameState a => MCParams -> a -> MCSolvedGame
-mctsSolver mcParams gs = MCSolvedGame {mcParams, mcNode = mkLeaf gs}
+mctsSolver mcParams gs = MCSolvedGame {mcParams, mcNode = mkLeaf False gs}
 
 data MTMCSolvedGame = MTMCSolvedGame {mtNodes :: [MCNode], mtParams :: MCParams}
 
@@ -308,4 +320,10 @@ instance SolvedGameState MTMCSolvedGame where
 
 -- | Solve a game with Multithreaded MCTS
 mtmctsSolver :: GameState a => Int -> MCParams -> a -> MTMCSolvedGame
-mtmctsSolver n mtParams gs = MTMCSolvedGame {mtParams, mtNodes = map mkLeaf $ replicate n gs}
+mtmctsSolver n mtParams gs = MTMCSolvedGame {mtParams, mtNodes = map (mkLeaf False) $ replicate n gs}
+
+lessevilMCTS :: GameState a => MCParams -> a -> [String] -> String
+lessevilMCTS = undefined
+
+lessevilMTMCTS :: GameState a => Int -> MCParams -> a -> [String] -> String
+lessevilMTMCTS = undefined

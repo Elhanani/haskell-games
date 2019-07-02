@@ -11,10 +11,13 @@ import System.Random
 type ABValue = (Value, Value)
 
 data ABParams gs = ABParams {alpha :: {-# UNPACK #-} !Value, beta :: {-# UNPACK #-} !Value,
-                             chooser :: Maybe (ChoiceHeuristic gs)}
+                             chooser :: Maybe (ChoiceHeuristic gs),
+                             lessevil :: gs -> [String] -> IO String}
 
 defaultABParams :: forall gs. (GameState gs) => ABParams gs
-defaultABParams = ABParams {alpha = -1, beta = 1, chooser = Nothing}
+defaultABParams = ABParams {alpha = -1, beta = 1, chooser = Nothing,
+                            lessevil = const randomAction}
+
 
 -- | A choice heuristic is used to start the search from the most promising branches first
 type ChoiceHeuristic gs = gs -> String -> Value
@@ -44,6 +47,7 @@ instance SolvedGameState ABSolvedGame where
     rand <- newStdGen
     return $ head $ filter ((== value g) . value . snd) $ fst $ shuffle (actions g) rand
 
+-- To be removed
 -- | (Lazily) Shuffle the list
 shuffle :: forall a rg. (RandomGen rg) => [a] -> rg -> ([a], rg)
 shuffle [] rand = ([], rand)
