@@ -73,6 +73,7 @@ combineValues (NodeValue a b) (NodeValue x y) = NodeValue (a+x) (b+y)
 instance Ord NodeValue where
   compare (NodeValue a b) (NodeValue x y) = compare (a/(b+1)) (x/(y+1))
 
+-- | Gets the node's value
 nodeValue :: MCNode -> NodeValue
 nodeValue (MCNode {children = Terminal !val _}) = NodeValue val 0
 nodeValue (MCNode {wins, simulations}) = NodeValue wins simulations
@@ -113,13 +114,21 @@ instance GameState MCSolvedGame where
       mkSolvedGame (str, mcNode) = (str, MCSolvedGame {mcParams, mcNode})
 
 instance SolvedGameState MCSolvedGame where
-  action (MCSolvedGame {mcParams, mcNode = node@(MCNode {gameState})}) =
-    best <$> timedadvance mcParams node where
-      best (MCNode {children = Terminal v terminals}) = toMCSolvedGame $
-        head $ filter ((== Just v) . terminalVal . snd) terminals -- should be changed to lessevil
-      best (MCNode {children = Trunk nonterminals _}) = toMCSolvedGame $
-        action' $ objective (comparing $! avgVal . snd . action') $ PQ.toAscList nonterminals
-      objective = playerObjectiveBy $! player gameState
+  action (MCSolvedGame {mcParams, mcNode = node@(MCNode {gameState})}) = do
+    newnode <- timedadvance mcParams node
+    toMCSolvedGame <$> best newnode
+    where
+      best (MCNode {children = Terminal v terminals}) = do
+        let actions' = filter ((== Just v) . terminalVal . snd) terminals
+        if v == playerBound player' mcParams
+          then randomAction actions'
+          else do
+            str <- lessevilMCTS mcParams gameState $ map fst actions'
+            return (str, fromJust $ lookup str actions')
+      best (MCNode {children = Trunk nonterminals _}) = return $
+        action' $ objective (comparing $! nodeValue . snd . action') $ PQ.toAscList nonterminals
+      objective = playerObjectiveBy $! player'
+      player' = player gameState
       toMCSolvedGame (str, mcNode) = (str, MCSolvedGame {mcParams, mcNode})
   think (MCSolvedGame {mcParams, mcNode}) = do
     newnode <- advanceuntil mcParams mcNode
@@ -326,7 +335,7 @@ instance SolvedGameState MTMCSolvedGame where
       -- best (MCNode {children = Terminal (v, terminals)}) = toMCSolvedGame $
       --   head $ filter ((== Just v) . terminalVal . snd) terminals
       -- best (MCNode {children = Trunk (nonterminals, _)}) = toMCSolvedGame $
-      --   action' $ objective (comparing $! avgVal . snd . action') $ PQ.toAscList nonterminals
+      --   action' $ objective (comparing $! nodeValue . snd . action') $ PQ.toAscList nonterminals
       mcplayer (MCNode {gameState}) = player gameState
       objective = playerObjectiveBy $! mcplayer $ head mtNodes
       -- toMCSolvedGame (str, mcNode) = (str, MCSolvedGame {mcParams, mcNode})
@@ -345,7 +354,7 @@ lessevilMCTS :: GameState a => MCParams -> a -> [String] -> IO String
 lessevilMCTS params gs strs = do
   MCNode {children = (Trunk nonterminals _)} <- timedadvance (params {inert = True}) $ mkLeaf True gs
   let valids = filter (\(str, _) -> elem str strs) $ map action' $ PQ.toAscList nonterminals
-      objective = playerObjectiveBy (player gs) (comparing $ avgVal . snd)
+      objective = playerObjectiveBy (player gs) (comparing $ nodeValue . snd)
   return $ fst $ objective valids
 
 -- | returns the best value regardless of terminal states
