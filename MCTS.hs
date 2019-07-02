@@ -121,12 +121,24 @@ instance SolvedGameState MCSolvedGame where
       best (MCNode {children = Terminal v terminals}) = do
         let actions' = filter ((== Just v) . terminalVal . snd) terminals
         if v == playerBound player' mcParams
-          then randomAction actions'
+          then return $ head actions'
           else do
             str <- lessevilMCTS mcParams gameState $ map fst actions'
             return (str, fromJust $ lookup str actions')
-      best (MCNode {children = Trunk nonterminals _}) = return $
-        action' $ objective (comparing $! nodeValue . snd . action') $ PQ.toAscList nonterminals
+      best (MCNode {children = Trunk nonterminals []}) = return $
+        objective (comparing $! nodeValue . snd) $ map action' $ PQ.toAscList nonterminals
+      best (MCNode {children = Trunk nonterminals terminals}) = do
+        let bestnt = objective (comparing $ nodeValue . snd) $ map action' $ PQ.toAscList nonterminals
+            bestter = objective (comparing $ nodeValue . snd) terminals
+            ternv@(NodeValue v _) = nodeValue $ snd bestter
+            takent = case player' of
+              Maximizer -> ternv < (nodeValue $ snd bestnt)
+              Minimizer -> ternv > (nodeValue $ snd bestnt)
+        if takent then return bestnt
+          else do
+            let actions' = filter ((== Just v) . terminalVal . snd) terminals
+            str <- lessevilMCTS mcParams gameState $ map fst actions'
+            return (str, fromJust $ lookup str actions')
       objective = playerObjectiveBy $! player'
       player' = player gameState
       toMCSolvedGame (str, mcNode) = (str, MCSolvedGame {mcParams, mcNode})
@@ -323,7 +335,8 @@ instance SolvedGameState MTMCSolvedGame where
     best <$> mapConcurrently (timedadvance mtParams) mtNodes where
       best nodes = (beststr, MTMCSolvedGame {mtParams, mtNodes = multiact beststr}) where
         multiactions = map (mkActions . children) nodes
-        beststr = fst $ objective (comparing snd) $ M.toList solutions
+        -- this should use lessevil!
+        beststr = undefined $ fst $ objective (comparing snd) $ M.toList solutions
         solutions = foldr addthread M.empty multiactions
         addthread actionlist table = foldr aggaction table actionlist
         aggaction (str, node) = M.alter (aggnode node) str
