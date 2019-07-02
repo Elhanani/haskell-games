@@ -324,21 +324,14 @@ instance SolvedGameState MTMCSolvedGame where
       best nodes = (beststr, MTMCSolvedGame {mtParams, mtNodes = multiact beststr}) where
         multiactions = map (mkActions . children) nodes
         beststr = fst $ objective (comparing snd) $ M.toList solutions
-        solutions :: M.Map String Value -- probably better to change Value to NodeValue
         solutions = foldr addthread M.empty multiactions
         addthread actionlist table = foldr aggaction table actionlist
         aggaction (str, node) = M.alter (aggnode node) str
-        aggnode node Nothing = undefined
-        aggnode node preval = undefined
+        aggnode node Nothing = Just $ nodeValue node
+        aggnode node (Just preval) = Just $ combineValues preval $ nodeValue node
         multiact str = map (fromJust . lookup str) multiactions
-      -- (best . mcNode) <$> timedadvance mcsg where
-      -- best (MCNode {children = Terminal (v, terminals)}) = toMCSolvedGame $
-      --   head $ filter ((== Just v) . terminalVal . snd) terminals
-      -- best (MCNode {children = Trunk (nonterminals, _)}) = toMCSolvedGame $
-      --   action' $ objective (comparing $! nodeValue . snd . action') $ PQ.toAscList nonterminals
       mcplayer (MCNode {gameState}) = player gameState
       objective = playerObjectiveBy $! mcplayer $ head mtNodes
-      -- toMCSolvedGame (str, mcNode) = (str, MCSolvedGame {mcParams, mcNode})
   think (MTMCSolvedGame {mtParams, mtNodes}) = do
     funcs <- mapM (advanceuntil mtParams) mtNodes
     return $ do
