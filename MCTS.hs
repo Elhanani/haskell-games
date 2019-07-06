@@ -1,6 +1,8 @@
 {-# LANGUAGE ExistentialQuantification, BangPatterns, NamedFieldPuns, RankNTypes #-}
 
-module MCTS where
+module MCTS (MCParams(..), defaultMCParams,
+             mctsSolver, mtmctsSolver,
+             lessevilMCTS, lessevilMTMCTS) where
 
 import SolverDefs
 import Data.Maybe
