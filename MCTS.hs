@@ -313,6 +313,7 @@ rollouts !n !gs !rand1 = (v + w, rand3) where
 mctsSolver :: GameState a => MCParams -> a -> MCSolvedGame
 mctsSolver mcParams gs = MCSolvedGame {mcParams, mcNode = mkLeaf False gs}
 
+-- | Multithreaded MCTS solver
 data MTMCSolvedGame = MTMCSolvedGame {mtNodes :: [MCNode], mtParams :: MCParams}
 
 instance Show MTMCSolvedGame where
@@ -331,25 +332,34 @@ instance GameState MTMCSolvedGame where
     mkSolvedGame (str, mtNodes) = (str, MTMCSolvedGame {mtParams, mtNodes})
 
 instance SolvedGameState MTMCSolvedGame where
-  action (MTMCSolvedGame {mtParams, mtNodes}) =
-    best <$> mapConcurrently (timedadvance mtParams) mtNodes where
-      best nodes = (beststr, MTMCSolvedGame {mtParams, mtNodes = multiact beststr}) where
-        multiactions = map (mkActions . children) nodes
-        -- this should use lessevil!
-        beststr = undefined $ fst $ objective (comparing snd) $ M.toList solutions
-        solutions = foldr addthread M.empty multiactions
-        addthread actionlist table = foldr aggaction table actionlist
-        aggaction (str, node) = M.alter (aggnode node) str
-        aggnode node Nothing = Just $ nodeValue node
-        aggnode node (Just preval) = Just $ combineValues preval $ nodeValue node
+  action (MTMCSolvedGame {mtParams, mtNodes = mtNodes@(MCNode {gameState}:_)}) = do
+    nodes <- mapConcurrently (timedadvance mtParams) mtNodes
+    let multiactions = map (mkActions . children) nodes
+        solutions = combinedSolutions multiactions
+        (possiblestr, bestval) = objective (comparing snd) solutions
         multiact str = map (fromJust . lookup str) multiactions
-      mcplayer (MCNode {gameState}) = player gameState
-      objective = playerObjectiveBy $! mcplayer $ head mtNodes
+        mcplayer (MCNode {gameState}) = player gameState
+        player' = mcplayer $ head mtNodes
+        objective = playerObjectiveBy player'
+        retval str = (str, MTMCSolvedGame {mtParams, mtNodes = multiact str})
+        regularval (NodeValue a b) = b /= 0 || a == playerBound player' mtParams
+    if regularval bestval then return $ retval possiblestr else do
+      let strs = map fst $ filter ((== bestval) . snd) solutions
+      str <- lessevilMTMCTS (length mtNodes) mtParams gameState strs
+      return $ retval str
   think (MTMCSolvedGame {mtParams, mtNodes}) = do
     funcs <- mapM (advanceuntil mtParams) mtNodes
     return $ do
       mtNodes <- sequence funcs
       return MTMCSolvedGame {mtParams, mtNodes}
+
+-- | The combined values of different thread solutions
+combinedSolutions :: [[MCAction]] -> [(String, NodeValue)]
+combinedSolutions multiactions = M.toList $ foldr addthread M.empty multiactions where
+  addthread actionlist table = foldr aggaction table actionlist
+  aggaction (str, node) = M.alter (aggnode node) str
+  aggnode node Nothing = Just $ nodeValue node
+  aggnode node (Just preval) = Just $ combineValues preval $ nodeValue node
 
 -- | Solve a game with Multithreaded MCTS
 mtmctsSolver :: GameState a => Int -> MCParams -> a -> MTMCSolvedGame
@@ -365,4 +375,10 @@ lessevilMCTS params gs strs = do
 
 -- | returns the best value regardless of terminal states
 lessevilMTMCTS :: GameState a => Int -> MCParams -> a -> [String] -> IO String
-lessevilMTMCTS = undefined
+lessevilMTMCTS n params gs strs = do
+  nodes <- mapConcurrently ((timedadvance $ params {inert = True}) . (mkLeaf False)) $ replicate n gs
+  let solutions = combinedSolutions $ map (mkActions . children) nodes
+      mcplayer (MCNode {gameState}) = player gameState
+      objective = playerObjectiveBy (mcplayer $ head nodes) (comparing snd)
+      valids = filter (\(str, _) -> elem str strs) solutions
+  return $ fst $ objective valids
