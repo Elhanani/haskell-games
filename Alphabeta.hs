@@ -1,109 +1,83 @@
 {-# LANGUAGE ExistentialQuantification, NamedFieldPuns, RankNTypes, BangPatterns #-}
 
-module Alphabeta (alphabetaSolver, chAlphabetaSolver) where
+module Alphabeta where --()
 
 import SolverDefs
 import Data.Maybe
 import Data.List
 import System.Random
 
-
-type ABValue = (Value, Value)
-
+-- | alpha, beta are the broadest alpha/beta for the search
+--   oactions is the ordered actions list for search
+--   lessevil is a function to select an option when it's impossible to guarantee a win
 data ABParams gs = ABParams {alpha :: {-# UNPACK #-} !Value, beta :: {-# UNPACK #-} !Value,
-                             chooser :: Maybe (ChoiceHeuristic gs),
+                             oactions :: gs -> [(String, gs)],
                              lessevil :: gs -> [String] -> IO String}
 
 defaultABParams :: forall gs. (GameState gs) => ABParams gs
-defaultABParams = ABParams {alpha = -1, beta = 1, chooser = Nothing,
+defaultABParams = ABParams {alpha = -1, beta = 1, oactions = actions,
                             lessevil = const randomAction}
 
+isSufficient :: GameState gs => Player -> ABParams gs -> ABValue -> Bool
+isSufficient Maximizer (ABParams {beta}) (Just val, _) = val >= beta
+isSufficient Minimizer (ABParams {alpha}) (_, Just val) = val <= alpha
+isSufficient _ _ _ = False
 
--- | A choice heuristic is used to start the search from the most promising branches first
-type ChoiceHeuristic gs = gs -> String -> Value
+-- | Lowerbound and upperbound
+type ABValue = (Maybe Value, Maybe Value)
 
--- | A state heuristic is used to bound the searches
-type StateHeuristic gs = gs -> Value
+type ABAction gs = (String, ABNode gs)
 
--- | The value is computed lazily using the abvalue function
+data ABNode gs = ABNode {gameState :: gs,
+                         value :: ABValue,
+                         sufficient :: Maybe (ABAction gs),
+                         unknowns :: [(ABAction gs)],
+                         knowns :: [ABAction gs],
+                         worst :: [ABAction gs],
+                         best :: [ABAction gs]}
+
 data ABSolvedGame = forall gs. (GameState gs) =>
-  ABSolvedGame {gameState :: gs,
-                actions' :: [(String, ABSolvedGame)],
-                abvalue :: ABValue -> Value,
-                value :: Value}
+  ABSolvedGame {abNode :: ABNode gs,
+                abParams :: ABParams gs}
 
 instance Show ABSolvedGame where
-  show (ABSolvedGame {gameState}) = show gameState
+  show ABSolvedGame {abNode = ABNode {gameState}} = show gameState
 
 instance GameState ABSolvedGame where
-  player (ABSolvedGame {gameState}) = player gameState
-  terminal (ABSolvedGame {gameState}) = terminal gameState
-  maxdepth (ABSolvedGame {gameState}) = maxdepth gameState
-  actions = actions'
+  player ABSolvedGame {abNode = ABNode {gameState}} = player gameState
+  terminal ABSolvedGame {abNode = ABNode {gameState}} = terminal gameState
+  maxdepth ABSolvedGame {abNode = ABNode {gameState}} = maxdepth gameState
+  actions ABSolvedGame {abParams, abNode = ABNode {best, worst, knowns, unknowns, sufficient}} =
+    map mkSolvedGame (unknowns ++ knowns ++ best ++ worst ++ maybeToList sufficient) where
+      mkSolvedGame (str, abNode) = (str, ABSolvedGame {abParams, abNode})
 
--- This is the top search and could be made multithreaded.
 instance SolvedGameState ABSolvedGame where
-  action g = do
-    rand <- newStdGen
-    return $ head $ filter ((== value g) . value . snd) $ fst $ shuffle (actions g) rand
+  action ABSolvedGame {abParams, abNode} = getAction $ findBest abParams abNode where
+    getAction (ABNode {sufficient = Just (str, node)}) =
+      return (str, ABSolvedGame {abParams, abNode = node})
+    getAction (ABNode {gameState, best=best@(_:_)}) = do
+      str <- (lessevil abParams) gameState $ map fst best
+      return (str, ABSolvedGame {abParams, abNode = fromJust $ lookup str best})
+    getAction (ABNode {gameState, worst}) = do
+      str <- (lessevil abParams) gameState $ map fst worst
+      return (str, ABSolvedGame {abParams, abNode = fromJust $ lookup str worst})
 
--- To be removed
--- | (Lazily) Shuffle the list
-shuffle :: forall a rg. (RandomGen rg) => [a] -> rg -> ([a], rg)
-shuffle [] rand = ([], rand)
-shuffle xs rand = (x:rest', rand'') where
-  (k, rand') = randomR (0, length xs - 1) rand
-  x = xs !! k
-  rest = (take k xs) ++ (drop (k+1) xs)
-  (rest', rand'') = shuffle rest rand'
+-- This should look into "actions" first to determine if there is a "sufficient" state
+-- among the already cached values.
+mkNode :: GameState gs => gs -> ABParams gs -> ABNode gs
+mkNode gameState params@(ABParams {oactions}) = ABNode {gameState, value = (Nothing, Nothing),
+                                                        sufficient = Nothing, unknowns, knowns = [],
+                                                        best = [], worst = []} where
+  unknowns = map (\(str, x) -> (str, mkNode x params)) $ oactions gameState
 
--- | Solve the game for the alpha/beta given
-alphabetaSolver :: (GameState a) => ABValue -> a -> ABSolvedGame
-alphabetaSolver !ab !gameState = ABSolvedGame {gameState, actions', abvalue = abval, value} where
-  internal (!str, !gs) = (str, alphabetaSolver ab gs)
-  actions' = map internal $ actions gameState
-  !tval = terminal gameState
-  value = abval ab
-  abval = if isJust $ tval then const $ fromJust tval else alphabetize actions' where
-    alphabetize [(_, ns)] !ab' = abvalue ns ab'
-    alphabetize !(x:xs) !(a, b) = let
-      !kidval = abvalue (snd x) (a, b)
-      in if a >= b then kidval else case player gameState of
-        Maximizer -> max kidval $ alphabetize xs (max a kidval, b)
-        Minimizer -> min kidval $ alphabetize xs (a, min b kidval)
-
--- | To be consolidated into alphabeta solver by using ABParams
-chAlphabetaSolver :: (GameState a) => ChoiceHeuristic a -> ABValue -> a -> ABSolvedGame
-chAlphabetaSolver !chooser !ab !gameState = ABSolvedGame {gameState, actions', abvalue = abval, value} where
-  internal (!str, !gs) = (str, alphabetaSolver ab gs)
-  actions' = map internal $ sortOn (chooser gameState . fst) $! actions gameState
-  !tval = terminal gameState
-  value = abval ab
-  abval = if isJust $ tval then const $ fromJust tval else alphabetize actions' where
-    alphabetize [(_, ns)] !ab' = abvalue ns ab'
-    alphabetize !(x:xs) !(a, b) = let
-      !kidval = abvalue (snd x) (a, b)
-      in if a >= b then kidval else case player gameState of
-        Maximizer -> max kidval $ alphabetize xs (max a kidval, b)
-        Minimizer -> min kidval $ alphabetize xs (a, min b kidval)
+findBest :: GameState gs => ABParams gs -> ABNode gs -> ABNode gs
+findBest _ node@ABNode{unknowns=[], best=(_:_)} = node
+-- findBest params node = if isSufficient params node
+--   then node
+--   else findBest $ advanceNode params node where
+--     isSufficient params (ABNode {gameState, value}) =
 
 
--- memo should not be hard - we just figure out when we can be sure of the value
--- that happens when alpha and beta are intial, or when we get a "win" value
--- also when we improve an already existing bound
-
--- -- These should be multithreaded!
--- nhAlphabetaSolver :: (GameState a) => StateHeuristic a -> Int ->
---                                       ABValue -> a -> ABSolvedGame
--- nhAlphabetaSolver eval depth ab gs = undefined
---
--- nchAlphabetaSolver :: (GameState a) => ChoiceHeuristic a -> StateHeuristic a -> Int ->
---                                        ABValue -> a -> ABSolvedGame
--- nchAlphabetaSolver chooser eval depth ab gs = undefined
-
-
-{- A simple example of a choice heuristic is to choose nodes with less actions.
-   The assumption is that :
-   1. Forcing an opponent is generally a good thing
-   2. The subtree may be smaller and so quicker to traverse
--}
+-- if sufficient exists and is as good as the requirement then do nothing
+-- if suffiecent doesn't exist (or not as good as required) deplete the unknowns
+-- if nothing is unknown then do nothing

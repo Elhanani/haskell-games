@@ -232,15 +232,15 @@ timedadvance params node = do
         if ct > st || stopcond cgs then return cgs else internal $! multiadvance params' 100 cgs rand
       stopcond (MCNode {children = !(Terminal _ _)}) = True
       stopcond (MCNode {simulations}) = simulations > maxsim'
-  internal node
-  -- res <- internal node
-  -- let sims1 = simulations node
-  --     sims2 = simulations res
-  --     denom = (fromIntegral $ duration $ params)/1000
-  --     persec = (sims2-sims1) / denom
-  -- putStr "Performance: "
-  -- print ((sims1, sims2, denom), persec)
-  -- return res
+  -- internal node
+  res <- internal node
+  let sims1 = simulations node
+      sims2 = simulations res
+      denom = (fromIntegral $ duration $ params)/1000
+      persec = (sims2-sims1) / denom
+  putStr "Performance: "
+  print ((sims1, sims2, denom), persec)
+  return res
 
 -- | Perform several advances
 multiadvance :: (RandomGen rg) => MCParams -> Int -> MCNode -> rg -> MCNode

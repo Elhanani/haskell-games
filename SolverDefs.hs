@@ -28,7 +28,6 @@ otherPlayer :: Player -> Player
 otherPlayer Maximizer = Minimizer
 otherPlayer Minimizer = Maximizer
 
-
 -- | A GameState is a representation of a specific state of a game.
 class (Show gs) => GameState gs where
   -- | Which player's turn is it to play in the given node

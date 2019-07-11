@@ -136,7 +136,7 @@ symmetries = [["e5"], ["d4", "f4", "d6", "f6"], ["e4", "d5", "f5", "e6"],
 
 -- main = putStrLn "\n" >> interaction initial randomSolver randomSolver
 
-mymctssolver = mctsSolver defaultMCParams -- {background=False}
+mymctssolver = mctsSolver defaultMCParams {background=False}
 
 -- main = putStrLn " ">> humanInteraction initial mymctssolver
 

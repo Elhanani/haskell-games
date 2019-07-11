@@ -3,10 +3,20 @@ import Minmax
 import Alphabeta
 import Data.List.Split
 import Data.Maybe
+import Data.Hashable
 import qualified Data.Array as A
 
-data Square = Ex | Oh | None deriving (Eq, Ord)
+
+data Square = Ex | Oh | None deriving (Eq, Ord, Enum)
 type Miniboard = A.Array Int Square
+
+
+instance Hashable Square where
+  hashWithSalt n = (hashWithSalt n) . fromEnum
+
+instance Hashable BoardState where
+  hashWithSalt n (Board (_, mb, _)) = hashWithSalt n $ A.elems mb
+
 
 -- | Number of moves played so far, the board itself, and the terminal value
 newtype BoardState = Board (Int, Miniboard, Maybe Value) deriving (Eq, Ord)
@@ -67,4 +77,4 @@ initial :: BoardState
 initial = Board (0, A.listArray (0, 8) $ repeat None, Nothing)
 
 main = putStrLn "\n" >> interaction initial absolver absolver where
-  absolver = alphabetaSolver (-1, 1)
+  absolver = hashMinmaxSolver --  alphabetaSolver (-1, 1)

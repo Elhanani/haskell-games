@@ -3,6 +3,7 @@
 import Data.List
 import Data.Maybe
 import SolverDefs
+import Cache
 import MCTS
 import qualified Data.Array as A
 import qualified PQueueQuick as PQ
@@ -87,11 +88,20 @@ initial = Board {content = A.listArray ((0,0), (5, 6)) $ repeat None,
                  terminal' = Nothing,
                  numactions' = 7}
 
-mymctssolver = mctsSolver defaultMCParams {background=True, duration=2000}
+-- main = do
+--   let x = mtmctsSolver 3 defaultMCParams initial
+--   print $ map simulations $ mtNodes x
+--   f <- think x
+--   getLine
+--   y <- f
+--   print $ map simulations $ mtNodes y
 
+-- main = putStrLn "" >> (humanInteraction initial $ mtmctsSolver 3 $ defaultMCParams)
 
-main = putStrLn "" >> humanInteraction initial mymctssolver
--- main = putStrLn "\n\n\n" >> interaction initial mymctssolver mymctssolver >> main
+-- solver1 = mtmctsSolver 3 $ defaultMCParams {background = False, duration = 1000}
+-- solver2 = mctsSolver $ defaultMCParams {background = False, duration = 1000}
+solver3 = mctsSolver $ defaultMCParams
+main = putStrLn "\n\n\n" >> interaction initial solver3 solver3
 
 -- main = do
 --   x <- multitimed initial 2500
