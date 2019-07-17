@@ -6,12 +6,10 @@
            , NamedFieldPuns
              #-}
 
-module Cache (Cache(..), Hashable, STHashRef,
-              runNoCache, runMapCache, runHashMapCache,
-              SingleHashRef, newSingleHashRef) where
+module Cache (Cache(..), Hashable,
+              runNoCache, runMapCache, runHashMapCache) where
 
 import Data.Hashable
-import Data.Proxy
 import Control.Monad.ST
 import Control.Monad.Reader
 import Data.Functor.Identity
@@ -22,14 +20,10 @@ import qualified Data.Array.ST as STA
 import Control.Monad.State
 import Control.Monad.ST
 
--- runNoCache = undefined
--- runMapCache = undefined
--- runHashMapCache = undefined
 
+-- | Different types of transposition tables
 
--- | Pure types of transposition tables
-
-class Monad m => Cache m k v where
+class (Monad m) => Cache m k v where
   readCache :: k -> m (Maybe v)
   readCacheDefault :: k -> v -> m v
   writeCache :: k -> v -> m ()
@@ -41,11 +35,11 @@ class Monad m => Cache m k v where
       Just !jv -> jv
       Nothing -> dv
 
-class (Cache (ReaderT r (ST s)) k v) => STHashRef r s k v
 
 -- | Trivial implementation (i.e no table)
 
 instance Cache Identity k v where
+  -- runEmptyCache = runIdentity
   readCache _ = return Nothing
   readCacheDefault _ a = return a
   writeCache _ _ = return ()
@@ -80,42 +74,41 @@ runHashMapCache f k = fst $ runState (f k) H.empty
 
 -- | ST Monad with a partial hashtable
 
-data SingleHashRef s k v = SingleHashRef {singleArray :: STA.STArray s Int (Maybe (k, v))
-                                        , singleOverwrite :: (k, v) -> (k, v) -> Bool
-                                        , singleSize :: !Int
+data SingleHashRef s k v = SingleHashRef {array :: STA.STArray s Int (Maybe (k, v))
+                                        , overwrite :: (k, v) -> (k, v) -> Bool
+                                        , size :: !Int
                                           }
 
 instance (Hashable k, Eq k) => Cache (ReaderT (SingleHashRef s k v) (ST s)) k v where
   readCache !k = do
-    !SingleHashRef {singleArray, singleSize} <- ask
+    !SingleHashRef {array, size} <- ask
     let f (Just (k, v)) = Just v
         f _ = Nothing
-    fmap f $ lift $ STA.readArray singleArray (mod (hash k) singleSize)
+    fmap f $ lift $ STA.readArray array (mod (hash k) size)
   writeCache !k !v = do
-    !SingleHashRef {singleArray, singleOverwrite, singleSize} <- ask
-    !current <- lift $ STA.readArray singleArray (mod (hash k) singleSize)
+    !SingleHashRef {array, overwrite, size} <- ask
+    !current <- lift $ STA.readArray array (mod (hash k) size)
     let f Nothing = True
-        f (Just (k', v')) = k' == k || singleOverwrite (k', v') (k, v)
+        f (Just (k', v')) = k' == k || overwrite (k', v') (k, v)
     if f current
-      then lift $ STA.writeArray singleArray (mod (hash k) singleSize) (Just (k, v))
+      then lift $ STA.writeArray array (mod (hash k) size) (Just (k, v))
       else return ()
   filterCache !f = do
-    !SingleHashRef {singleArray, singleSize} <- ask
+    !SingleHashRef {array, size} <- ask
     let g n = do
-              current <- STA.readArray singleArray (mod n singleSize)
+              current <- STA.readArray array (mod n size)
               if isNothing current then return () else let Just (k, v) = current in
-                if f k v then return () else STA.writeArray singleArray (mod n singleSize) Nothing
-    lift $ mapM_ g [0..singleSize-1]
+                if f k v then return () else STA.writeArray array (mod n size) Nothing
+    lift $ mapM_ g [0..size-1]
 
-instance (Eq k, Hashable k) => STHashRef (SingleHashRef s k v) s k v -- forall s. ??
+runSingleHashCache :: Int -> ((k, v) -> (k, v) -> Bool) ->
+                      (k -> ReaderT (SingleHashRef s k v) (ST s) v) -> k -> v
+runSingleHashCache size overwrite f k = runST $ do
+  array <- STA.newArray (0, size-1) Nothing
+  runReaderT (f k) (SingleHashRef {array, size, overwrite})
 
-newSingleHashRef :: Int -> ((k, v) -> (k, v) -> Bool) -> ST s (SingleHashRef s k v)
-newSingleHashRef singleSize singleOverwrite = do
-  array <- STA.newArray (0, singleSize-1) Nothing
-  return SingleHashRef {singleArray = array, singleSize, singleOverwrite}
 
--- runSingleHashCache :: Int -> ((k, v) -> (k, v) -> Bool) ->
---                       (k -> ReaderT (SingleHashRef s k v) (ST s) v) -> k -> v
--- runSingleHashCache singleSize singleOverwrite f k = runST $ do
---   array <- STA.newArray (0, singleSize-1) Nothing -- :: ST s (STA.STArray s Int (Maybe (k, v)))
---   runReaderT (f k) (SingleHashRef {singleArray = array, singleSize, singleOverwrite})
+  -- array :: ST s (STA.STArray s Int (Maybe (k, v)))
+  -- let ref :: SingleHashRef s k v
+  --     ref = SingleHashRef {size, overwrite, array}
+  -- runReaderT (f k) (SingleHashRef {size, overwrite})

@@ -39,7 +39,7 @@ instance SolvedGameState MMSolvedGame where
 --   value' = if isJust $ tval then fromJust tval else
 --     objective $ map (value . snd) $ actions'
 
--- | An unbound minmax solver with cache
+-- | An unbound minmax solver with Cache monad
 minmax :: (GameState gs, Cache m gs MMSolvedGame) => gs -> m MMSolvedGame
 minmax !gameState = do
   !mval <- readCache gameState
@@ -55,6 +55,12 @@ minmax !gameState = do
   where internal (str, !ogs) = do
           !ngs <- minmax ogs
           return (str, ngs)
+
+-- | An unbound minmax solver with ST monad
+
+-- minmaxST :: (GameState gs, STHashRef ref gs MMSolvedGame) => ref -> gs -> MMSolvedGame
+-- minmaxST = runST $ do
+--   return undefined
 
 -- | A simple unbound minmax solver
 minmaxSolver :: (GameState a) => a -> MMSolvedGame
