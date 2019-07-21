@@ -15,14 +15,14 @@ instance Hashable Square where
   hashWithSalt n = (hashWithSalt n) . fromEnum
 
 instance Hashable BoardState where
-  hashWithSalt n (Board (_, mb, _)) = hashWithSalt n $ A.elems mb
+  hashWithSalt n (Board (_, _, h, _)) = hashWithSalt n h
 
 
 -- | Number of moves played so far, the board itself, and the terminal value
-newtype BoardState = Board (Int, Miniboard, Maybe Value) deriving (Eq, Ord)
+newtype BoardState = Board (Int, Miniboard, Integer, Maybe Value) deriving (Eq, Ord)
 
 instance Show BoardState where
-  show gs@(Board (n, board, v)) = showboard ++ "\n" ++ message where
+  show gs@(Board (n, board, _, v)) = showboard ++ "\n" ++ message where
     showboard = unlines $ (zipWith (++) legend) $ chunksOf 3 $ map f $ A.elems board where
     f Ex = 'X'
     f Oh = 'O'
@@ -38,9 +38,9 @@ instance Show BoardState where
     movemessage = "Possible moves are " ++ (unwords $ map fst $ actions gs) ++ "\n"
 
 instance GameState BoardState where
-  player (Board (n, _, _)) = if mod n 2 == 0 then Maximizer else Minimizer
-  terminal (Board (_, _, v)) = v
-  actions gs@(Board (_, _, v)) = catMaybes [fmap ((,) (show (n+1))) (mkState gs n) | n <- [0..8]]
+  player (Board (n, _, _, _)) = if mod n 2 == 0 then Maximizer else Minimizer
+  terminal (Board (_, _, _, v)) = v
+  actions gs@(Board (_, _, _, v)) = catMaybes [fmap ((,) (show (n+1))) (mkState gs n) | n <- [0..8]]
 
 -- | The winning positions
 winners :: [[Int]]
@@ -54,14 +54,17 @@ complements = (arr A.!) where
   arr = A.listArray (0, 8) $ map comps [0..8]
   comps n = map (filter (/= n)) $ filter (elem n) winners
 
+hasharr :: A.Array Int Integer
+hasharr = A.listArray (0, 8) $ map (\x -> 3^x) [0..8]
+
 -- | Is playing in this square wins the game?
 isWinner :: Square -> Int -> BoardState -> Bool
-isWinner player pos (Board (_, xs, _)) = or [and $ map f comps | comps <- complements pos]
+isWinner player pos (Board (_, xs, _, _)) = or [and $ map f comps | comps <- complements pos]
   where f n = xs A.! n == player
 
 -- | Produces the branch states
 mkState :: BoardState -> Int -> Maybe BoardState
-mkState gs@(Board (l, b, v)) n = if b A.! n /= None then Nothing else let
+mkState gs@(Board (l, b, h, v)) n = if b A.! n /= None then Nothing else let
   player' = player gs
   sqrtype = case player' of
     Maximizer -> Ex
@@ -69,12 +72,17 @@ mkState gs@(Board (l, b, v)) n = if b A.! n /= None then Nothing else let
   winval = Just $ playerValue player'
   nb = b A.// [(n, sqrtype)]
   winner = isWinner sqrtype n gs
-  next x = Just $ Board (l+1, nb, x)
+  z = hasharr A.! n
+  nh = case player' of
+    Maximizer -> h + z
+    Minimizer -> h - z
+  next x = Just $ Board (l+1, nb, nh, x)
   in if winner then next $ winval else if l == 8 then next (Just 0) else next Nothing
 
 -- | Initial state
 initial :: BoardState
-initial = Board (0, A.listArray (0, 8) $ repeat None, Nothing)
+initial = Board (0, A.listArray (0, 8) $ repeat None, 0, Nothing)
 
 main = putStrLn "\n" >> interaction initial absolver absolver where
-  absolver = hashMinmaxSolver --  alphabetaSolver (-1, 1)
+  -- absolver = hashMinmaxSolver --  alphabetaSolver (-1, 1)
+  absolver = singleLRUMinmaxSolver 10000 --  alphabetaSolver (-1, 1)

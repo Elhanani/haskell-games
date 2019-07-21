@@ -5,10 +5,11 @@
            , BangPatterns
            #-}
 
-module Minmax (minmaxSolver, ordMinmaxSolver, hashMinmaxSolver) where
+module Minmax (minmaxSolver, ordMinmaxSolver, hashMinmaxSolver, singleLRUMinmaxSolver) where
 
 import SolverDefs
 import Control.Monad.State
+import Control.Monad.ST
 import Data.Maybe
 import qualified Data.Map as M
 import Cache
@@ -39,21 +40,27 @@ instance SolvedGameState MMSolvedGame where
 --   value' = if isJust $ tval then fromJust tval else
 --     objective $ map (value . snd) $ actions'
 
+-- wrong!!!
 -- | An unbound minmax solver with Cache monad
-minmax :: (GameState gs, Cache m gs MMSolvedGame) => gs -> m MMSolvedGame
-minmax !gameState = do
-  !mval <- readCache gameState
-  if isJust mval then return $ fromJust mval else
-    let !tval = terminal gameState in if isJust tval
-      then return MMSolvedGame {gameState, value = fromJust tval, actions' = []} else do
-        !actions' <- mapM internal $ actions gameState
-        let !objective = playerObjective $! player gameState
-            !cval = objective $! map (value . snd) $ actions'
-            !ngs = MMSolvedGame {gameState, value = cval, actions'}
-        writeCache gameState ngs
-        return ngs
-  where internal (str, !ogs) = do
-          !ngs <- minmax ogs
+minmax :: (GameState gs, Cache m r gs MMSolvedGame) => m r -> gs -> m MMSolvedGame
+minmax !mref !gs = do
+  !uref <- mref
+  minmax' uref gs
+  where
+    minmax' ref gameState = do
+      !mval <- readCache ref gameState
+      if isJust mval then return $ fromJust mval else
+        let !tval = terminal gameState in if isJust tval
+          then return MMSolvedGame {gameState, value = fromJust tval, actions' = []} else do
+            !actions' <- mapM internal $ actions gameState
+            let !objective = playerObjective $! player gameState
+                !cval = objective $! map (value . snd) $ actions'
+                !ngs = MMSolvedGame {gameState, value = cval, actions'}
+            writeCache ref gameState ngs
+            return ngs
+      where
+        internal (str, !ogs) = do
+          !ngs <- minmax' ref ogs
           return (str, ngs)
 
 -- | An unbound minmax solver with ST monad
@@ -74,3 +81,6 @@ ordMinmaxSolver g = runMapCache minmax g
 -- | A memoized unbound minmax solver
 hashMinmaxSolver :: (GameState gs, Hashable gs, Eq gs) => gs -> MMSolvedGame
 hashMinmaxSolver g = runHashMapCache minmax g
+
+singleLRUMinmaxSolver :: (GameState gs, Hashable gs, Eq gs) => Int -> gs -> MMSolvedGame
+singleLRUMinmaxSolver size g = runST $ singleHashCacheST size (const $ const True) minmax g where
