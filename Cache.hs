@@ -138,12 +138,3 @@ singleHashCacheST singleSize singleOverwrite f k = f mref k where
   !mref = do
     singleArray <- STA.newArray (0, singleSize-1) Nothing
     return SingleHashRef {singleArray, singleOverwrite, singleSize}
-
-
---
--- instance (Eq k, Hashable k) => STHashRef (SingleHashRef s k v) s k v -- forall s. ??
---
--- newSingleHashRef :: Int -> ((k, v) -> (k, v) -> Bool) -> ST s (SingleHashRef s k v)
--- newSingleHashRef singleSize singleOverwrite = do
---   array <- STA.newArray (0, singleSize-1) Nothing
---   return SingleHashRef {singleArray = array, singleSize, singleOverwrite}

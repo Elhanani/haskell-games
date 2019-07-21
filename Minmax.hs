@@ -30,17 +30,6 @@ instance GameState MMSolvedGame where
 instance SolvedGameState MMSolvedGame where
   action g = randomAction $ filter ((== value g) . value . snd) $ actions g
 
--- -- | Original minmax solver
--- minmaxSolver :: (GameState a) => a -> MMSolvedGame
--- minmaxSolver gameState = MMSolvedGame {gameState, value = value', actions'} where
---   internal (str, ngs) = (str, minmaxSolver ngs)
---   actions' = map internal $ actions gameState
---   tval = terminal gameState
---   objective = playerObjective $! player gameState
---   value' = if isJust $ tval then fromJust tval else
---     objective $ map (value . snd) $ actions'
-
--- wrong!!!
 -- | An unbound minmax solver with Cache monad
 minmax :: (GameState gs, Cache m r gs MMSolvedGame) => m r -> gs -> m MMSolvedGame
 minmax !mref !gs = do
@@ -63,12 +52,6 @@ minmax !mref !gs = do
           !ngs <- minmax' ref ogs
           return (str, ngs)
 
--- | An unbound minmax solver with ST monad
-
--- minmaxST :: (GameState gs, STHashRef ref gs MMSolvedGame) => ref -> gs -> MMSolvedGame
--- minmaxST = runST $ do
---   return undefined
-
 -- | A simple unbound minmax solver
 minmaxSolver :: (GameState a) => a -> MMSolvedGame
 minmaxSolver g = runNoCache minmax g
@@ -82,5 +65,6 @@ ordMinmaxSolver g = runMapCache minmax g
 hashMinmaxSolver :: (GameState gs, Hashable gs, Eq gs) => gs -> MMSolvedGame
 hashMinmaxSolver g = runHashMapCache minmax g
 
+-- | A memoized unbound minmax solver
 singleLRUMinmaxSolver :: (GameState gs, Hashable gs, Eq gs) => Int -> gs -> MMSolvedGame
 singleLRUMinmaxSolver size g = runST $ singleHashCacheST size (const $ const True) minmax g where

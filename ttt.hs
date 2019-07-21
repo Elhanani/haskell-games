@@ -54,6 +54,7 @@ complements = (arr A.!) where
   arr = A.listArray (0, 8) $ map comps [0..8]
   comps n = map (filter (/= n)) $ filter (elem n) winners
 
+-- | Quick hashing
 hasharr :: A.Array Int Integer
 hasharr = A.listArray (0, 8) $ map (\x -> 3^x) [0..8]
 
@@ -83,6 +84,6 @@ mkState gs@(Board (l, b, h, v)) n = if b A.! n /= None then Nothing else let
 initial :: BoardState
 initial = Board (0, A.listArray (0, 8) $ repeat None, 0, Nothing)
 
-main = putStrLn "\n" >> interaction initial absolver absolver where
-  -- absolver = hashMinmaxSolver --  alphabetaSolver (-1, 1)
-  absolver = singleLRUMinmaxSolver 10000 --  alphabetaSolver (-1, 1)
+main = putStrLn "\n" >> interaction initial solver solver where
+  -- solver = hashMinmaxSolver
+  solver = singleLRUMinmaxSolver 10000
