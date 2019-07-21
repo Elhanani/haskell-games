@@ -26,23 +26,6 @@ import qualified Data.Array.ST as STA
 import Control.Monad.State
 import Control.Monad.ST
 
--- runNoCache = undefined
--- runMapCache = undefined
--- runHashMapCache = undefined
-
-
--- | Pure types of transposition tables
-
--- data Cache' k v = (forall m. Monad m) =>
---   Cache' {readCache :: r -> k -> m (Maybe v)
---        , readCacheDefault :: r -> k -> v -> m v
---        , writeCache :: r -> k -> v -> m ()
---        , filterCache :: r -> (k -> v -> Bool) -> m ()
---        , runCache :: m a -> (a, kv)
---        , newRef :: m r
---        , loadRef :: kv -> m r
--- }
-
 class Monad m => Cache m r k v where
   readCache :: r -> k -> m (Maybe v)
   readCacheDefault :: r -> k -> v -> m v
@@ -100,7 +83,7 @@ runHashMapCache :: (State (H.HashMap k v) (HashMapCacheRef k v) -> k ->
 runHashMapCache f k = fst $ runState (f (return HashMapCacheRef) k) H.empty
 
 
--- | ST Monad with a partial hashtable
+-- | ST Monad with a single partial hashtable
 
 data SingleHashRef a k v =
   SingleHashRef {singleArray :: a Int (Maybe (k, v))

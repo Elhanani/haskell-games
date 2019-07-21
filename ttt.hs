@@ -19,7 +19,13 @@ instance Hashable BoardState where
 
 
 -- | Number of moves played so far, the board itself, and the terminal value
-newtype BoardState = Board (Int, Miniboard, Integer, Maybe Value) deriving (Eq, Ord)
+newtype BoardState = Board (Int, Miniboard, Integer, Maybe Value)
+
+instance Eq BoardState where
+  (Board (_, _, h1, _)) == (Board (_, _, h2, _)) = h1 == h2
+
+instance Ord BoardState where
+  compare (Board (_, _, h1, _)) (Board (_, _, h2, _)) = compare h1 h2
 
 instance Show BoardState where
   show gs@(Board (n, board, _, v)) = showboard ++ "\n" ++ message where
@@ -85,5 +91,6 @@ initial :: BoardState
 initial = Board (0, A.listArray (0, 8) $ repeat None, 0, Nothing)
 
 main = putStrLn "\n" >> interaction initial solver solver where
+  solver = ordMinmaxSolver
   -- solver = hashMinmaxSolver
-  solver = singleLRUMinmaxSolver 10000
+  -- solver = singleLRUMinmaxSolver 10000
