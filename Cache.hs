@@ -8,11 +8,11 @@
            , RankNTypes
              #-}
 
-module Cache (Cache(..), Hashable,
+module Cache (Cache(..), Hashable, HasInitial(..),
               NoCacheRef, runNoCache,
-              MapCacheRef, runMapCache,
-              HashMapCacheRef, runHashMapCache,
-              SingleHashRef, singleHashCacheST) where
+              MapCacheRef, mapSolver, MapState,
+              HashMapCacheRef, hashMapSolver, HashMapState,
+              SingleHashRef(..), singleHashCacheST, initialSingleHashRef, SingleHashState) where
 
 import Data.Hashable
 import Data.Proxy
@@ -23,8 +23,22 @@ import qualified Data.Map as M
 import qualified Data.HashMap.Strict as H
 import qualified Data.Array.MArray as MA
 import qualified Data.Array.ST as STA
+import qualified Data.Array as A
 import Control.Monad.State
 import Control.Monad.ST
+
+class HasInitial h where
+  initial :: h
+
+type HashMapState = H.HashMap
+instance HasInitial (HashMapState k v) where
+  initial = H.empty
+
+type MapState = M.Map
+instance HasInitial (MapState k v) where
+  initial = M.empty
+
+type SingleHashState k v =  SingleHashRef A.Array k v
 
 class Monad m => Cache m r k v where
   readCache :: r -> k -> m (Maybe v)
@@ -64,8 +78,12 @@ instance (Ord k) => Cache (State (M.Map k v)) (MapCacheRef k v) k v where
   writeCache _ !k !v = get >>= put . (M.insert k v)
   filterCache _ !f = get >>= put . (M.filterWithKey f)
 
-runMapCache :: (State (M.Map k v) (MapCacheRef k v) -> k -> State (M.Map k v) v) -> k -> v
-runMapCache f k = fst $ runState (f (return MapCacheRef) k) M.empty
+-- runMapCache :: (State (M.Map k v) (MapCacheRef k v) -> k -> State (M.Map k v) v) -> k -> v
+-- runMapCache f k = fst $ runState (f (return MapCacheRef) k) M.empty
+
+mapSolver :: (State (M.Map k v) (MapCacheRef k v) -> k ->
+              State (M.Map k v) v) -> M.Map k v -> k -> (v, M.Map k v)
+mapSolver f state k = runState (f (return MapCacheRef) k) state
 
 
 -- | State Monad with HashMap
@@ -78,9 +96,13 @@ instance (Hashable k, Eq k) => Cache (State (H.HashMap k v)) (HashMapCacheRef k 
   writeCache _ !k !v = get >>= put . (H.insert k v)
   filterCache _ !f = get >>= put . (H.filterWithKey f)
 
-runHashMapCache :: (State (H.HashMap k v) (HashMapCacheRef k v) -> k ->
-                    State (H.HashMap k v) v) -> k -> v
-runHashMapCache f k = fst $ runState (f (return HashMapCacheRef) k) H.empty
+-- runHashMapCache :: (State (H.HashMap k v) (HashMapCacheRef k v) -> k ->
+--                     State (H.HashMap k v) v) -> k -> v
+-- runHashMapCache f k = fst $ runState (f (return HashMapCacheRef) k) H.empty
+
+hashMapSolver :: (State (H.HashMap k v) (HashMapCacheRef k v) -> k ->
+                  State (H.HashMap k v) v) -> H.HashMap k v -> k -> (v, H.HashMap k v)
+hashMapSolver f state k = runState (f (return HashMapCacheRef) k) state
 
 
 -- | ST Monad with a single partial hashtable
@@ -115,9 +137,20 @@ instance (Hashable k, Eq k, Monad m, MA.MArray a (Maybe (k, v)) m) =>
     mapM_ g [0..singleSize-1]
 
 
-singleHashCacheST :: Int -> ((k, v) -> (k, v) -> Bool) ->
-                     ((ST s) (SingleHashRef (STA.STArray s) k v) -> k -> (ST s) v) -> k -> ST s v
-singleHashCacheST singleSize singleOverwrite f k = f mref k where
-  !mref = do
-    singleArray <- STA.newArray (0, singleSize-1) Nothing
-    return SingleHashRef {singleArray, singleOverwrite, singleSize}
+singleHashCacheST :: SingleHashRef A.Array k v ->
+                     ((ST s) (SingleHashRef (STA.STArray s) k v) -> k ->
+                     (ST s) (v, SingleHashRef (STA.STArray s) k v)) -> k ->
+                     ST s (v, SingleHashState k v)
+singleHashCacheST iref@(SingleHashRef {singleArray = arr}) f k = do
+  (ret, ref) <- f mref k
+  rarr <- STA.freeze $ singleArray ref
+  return (ret, iref {singleArray = rarr})
+  where
+    !mref = do
+      starr <- STA.thaw arr
+      return iref {singleArray = starr}
+
+initialSingleHashRef :: ((k, v) -> (k, v) -> Bool) -> Int -> SingleHashState k v
+initialSingleHashRef singleOverwrite singleSize =
+  SingleHashRef {singleArray, singleSize, singleOverwrite} where
+    singleArray = A.listArray (0, singleSize-1) $ repeat Nothing
