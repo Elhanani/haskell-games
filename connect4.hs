@@ -3,17 +3,26 @@
 import Data.List
 import Data.Maybe
 import SolverDefs
-import Cache
-import MCTS
+import Data.Hashable
+import MCTSVanilla
 import qualified Data.Array as A
-import qualified PQueueQuick as PQ
 
 data Square = Ex | Oh | None deriving Eq
-data BoardState = Board {content :: A.Array (Int, Int) Square,
-                         heights :: A.Array Int Int,
-                         totalmoves :: Int,
-                         terminal' :: Maybe Double,
-                         numactions' :: Int} deriving Eq
+data BoardState = Board {content :: A.Array (Int, Int) Square
+                       , heights :: A.Array Int Int
+                       , totalmoves :: Int
+                       , terminal' :: Maybe Double
+                       , numactions' :: Int
+                       , identifier :: Integer}
+
+instance Eq BoardState where
+ (Board {identifier=id1}) == (Board {identifier=id2}) = id1 == id2
+
+instance Ord BoardState where
+ compare (Board {identifier=id1}) (Board {identifier=id2}) = compare id1 id2
+
+instance Hashable BoardState where
+ hashWithSalt n (Board {identifier}) = hashWithSalt n identifier
 
 instance Show BoardState where
   show gs@(Board {content, terminal'}) = top ++ middle ++ bottom ++ message where
@@ -54,6 +63,10 @@ compsarr = A.array ((0,0), (5, 6)) $ map comps $ (,) <$> [0..5] <*> [0..6] where
     diag1 = (limitboard [(x-i, y-i) | i <- [1..3]], limitboard [(x+i, y+i) | i <- [1..3]])
     diag2 = (limitboard [(x+i, y-i) | i <- [1..3]], limitboard [(x-i, y+i) | i <- [1..3]])
 
+-- | Quickly finding the identifier
+idarr :: A.Array (Int, Int) Integer
+idarr = A.array ((0,0), (5, 6)) $ (\x y -> ((x, y), 3^(x+7*y))) <$> [0..5] <*> [0..6] where
+
 -- | Will playing in that position complete a win?
 isWinner :: BoardState -> Square -> Int -> Bool
 isWinner (!Board {content, heights}) !player !col =
@@ -66,11 +79,12 @@ isWinner (!Board {content, heights}) !player !col =
 
 -- | Next state after a move
 mkState :: BoardState -> Int -> BoardState
-mkState !gs@(Board {content, heights, totalmoves, numactions'}) !col =
-  Board {content=con', heights=hei', totalmoves=tot', numactions'=num', terminal'=ter'} where
-    (!sqrtype, !winval) = case mod totalmoves 2 of
-      0 -> (Ex, Just 1)
-      1 -> (Oh, Just (-1))
+mkState !gs@(Board {content, heights, totalmoves, numactions', identifier}) !col =
+  Board {content=con', heights=hei', totalmoves=tot',
+         numactions'=num', terminal'=ter', identifier=id'} where
+    (!sqrtype, !winval, !id') = case mod totalmoves 2 of
+      0 -> (Ex, Just 1, identifier - idarr A.! (height, col))
+      1 -> (Oh, Just (-1), identifier + idarr A.! (height, col))
     !height = heights A.! col
     !draw = totalmoves == 41
     !tot' = totalmoves + 1
@@ -82,11 +96,12 @@ mkState !gs@(Board {content, heights, totalmoves, numactions'}) !col =
 
 -- | An empty board
 initial :: BoardState
-initial = Board {content = A.listArray ((0,0), (5, 6)) $ repeat None,
-                 heights = A.listArray (0, 6) $ repeat 0,
-                 totalmoves = 0,
-                 terminal' = Nothing,
-                 numactions' = 7}
+initial = Board {content = A.listArray ((0,0), (5, 6)) $ repeat None
+               , heights = A.listArray (0, 6) $ repeat 0
+               , totalmoves = 0
+               , terminal' = Nothing
+               , numactions' = 7
+               , identifier = 0}
 
 -- main = do
 --   let x = mtmctsSolver 3 defaultMCParams initial
@@ -96,12 +111,12 @@ initial = Board {content = A.listArray ((0,0), (5, 6)) $ repeat None,
 --   y <- f
 --   print $ map simulations $ mtNodes y
 
--- main = putStrLn "" >> (humanInteraction initial $ mtmctsSolver 3 $ defaultMCParams)
+main = putStrLn "" >> (humanInteraction initial $ mtmctsSolver 2 $ defaultMCParams {duration=1000})
 
 -- solver1 = mtmctsSolver 3 $ defaultMCParams {background = False, duration = 1000}
 -- solver2 = mctsSolver $ defaultMCParams {background = False, duration = 1000}
-solver3 = mctsSolver $ defaultMCParams
-main = putStrLn "\n\n\n" >> interaction initial solver3 solver3
+-- solver3 = mctsSolver $ defaultMCParams
+-- main = putStrLn "\n\n\n" >> interaction initial solver3 solver3
 
 -- main = do
 --   x <- multitimed initial 2500
