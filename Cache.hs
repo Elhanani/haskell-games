@@ -52,8 +52,6 @@ class Monad m => Cache m r k v where
       Just !jv -> jv
       Nothing -> dv
 
--- class (Cache (ReaderT r (ST s)) k v) => STHashRef r s k v
-
 -- | Trivial implementation (i.e no table)
 
 data NoCacheRef k v = NoCacheRef
@@ -78,9 +76,6 @@ instance (Ord k) => Cache (State (M.Map k v)) (MapCacheRef k v) k v where
   writeCache _ !k !v = get >>= put . (M.insert k v)
   filterCache _ !f = get >>= put . (M.filterWithKey f)
 
--- runMapCache :: (State (M.Map k v) (MapCacheRef k v) -> k -> State (M.Map k v) v) -> k -> v
--- runMapCache f k = fst $ runState (f (return MapCacheRef) k) M.empty
-
 mapSolver :: (State (M.Map k v) (MapCacheRef k v) -> k ->
               State (M.Map k v) v) -> M.Map k v -> k -> (v, M.Map k v)
 mapSolver f state k = runState (f (return MapCacheRef) k) state
@@ -96,14 +91,9 @@ instance (Hashable k, Eq k) => Cache (State (H.HashMap k v)) (HashMapCacheRef k 
   writeCache _ !k !v = get >>= put . (H.insert k v)
   filterCache _ !f = get >>= put . (H.filterWithKey f)
 
--- runHashMapCache :: (State (H.HashMap k v) (HashMapCacheRef k v) -> k ->
---                     State (H.HashMap k v) v) -> k -> v
--- runHashMapCache f k = fst $ runState (f (return HashMapCacheRef) k) H.empty
-
 hashMapSolver :: (State (H.HashMap k v) (HashMapCacheRef k v) -> k ->
                   State (H.HashMap k v) v) -> H.HashMap k v -> k -> (v, H.HashMap k v)
 hashMapSolver f state k = runState (f (return HashMapCacheRef) k) state
-
 
 -- | ST Monad with a single partial hashtable
 
