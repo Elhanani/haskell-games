@@ -4,7 +4,7 @@ import Data.List
 import Data.Maybe
 import SolverDefs
 import Data.Hashable
-import MCTSVanilla
+import MCTS
 import qualified Data.Array as A
 
 data Square = Ex | Oh | None deriving Eq
@@ -59,7 +59,8 @@ compsarr = A.array ((0,0), (5, 6)) $ map comps $ (,) <$> [0..5] <*> [0..6] where
     limit4 = filter (\(a, b) -> length (a++b) >= 3)
     limitboard = filter (\(a, b) -> a >= 0 && a <= 5 && b >=0 && b <= 6)
     rows = (limitboard [(x, y-i) | i <- [1..3]], limitboard [(x, y+i) | i <- [1..3]])
-    cols = (limitboard [(x-i, y) | i <- [1..3]], [])
+    cols = (limitboard [(x-i, y) | i <- [1..3]], limitboard [(x+i, y) | i <- [1..3]])
+    -- cols = (limitboard [(x-i, y) | i <- [1..3]], [])
     diag1 = (limitboard [(x-i, y-i) | i <- [1..3]], limitboard [(x+i, y+i) | i <- [1..3]])
     diag2 = (limitboard [(x+i, y-i) | i <- [1..3]], limitboard [(x-i, y+i) | i <- [1..3]])
 
@@ -76,6 +77,20 @@ isWinner (!Board {content, heights}) !player !col =
     f (!dir1, !dir2) = remaining2 == 0 where
       !remaining1 = 3 - stretch dir1
       !remaining2 = remaining1 - (stretch $ take remaining1 dir2)
+
+moveHeuristic :: Int -> Int -> BoardState -> Player -> Int -> Int
+moveHeuristic !a !b s@(!Board {content, heights}) !player !col =
+  bonus + (sum $ map g $! compsarr A.! pos) where
+    !pos = (heights A.! col, col)
+    stretch !p = length . (takeWhile (\ix -> content A.! ix /= p))
+    f (!p, !c) (!dir1, !dir2) = c * (max 0 (squares-2)) where
+      !squares = (stretch p dir1) + (stretch p dir2)
+    g !dirs = case player of
+      Maximizer -> (f (Ex, b) dirs) + (f (Oh, a) dirs)
+      Minimizer -> (f (Oh, b) dirs) + (f (Ex, a) dirs)
+    bonus = case player of
+      Maximizer -> 100*(a+b)*(10*(fromEnum $ isWinner s Ex col) + (fromEnum $ isWinner s Oh col))
+      Minimizer -> 100*(a+b)*(10*(fromEnum $ isWinner s Oh col) + (fromEnum $ isWinner s Ex col))
 
 -- | Next state after a move
 mkState :: BoardState -> Int -> BoardState
