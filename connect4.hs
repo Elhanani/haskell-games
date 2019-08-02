@@ -78,6 +78,11 @@ isWinner (!Board {content, heights}) !player !col =
       !remaining1 = 3 - stretch dir1
       !remaining2 = remaining1 - (stretch $ take remaining1 dir2)
 
+-- | Needs to be redesigned.
+--   Phase 1 constructs the largest interval without X / without Y that are at most 3 squares
+--   apart from the current square. Then it turns it into a binary number, and get it score
+--   the scores would be computed in advance. We can ask what is the chance of X winning if
+--   all of the empties are random and the same for Y, assuming that the specific square gets X/Y.
 moveHeuristic :: Int -> Int -> BoardState -> Player -> Int -> Int
 moveHeuristic !a !b s@(!Board {content, heights}) !player !col =
   bonus + (sum $ map g $! compsarr A.! pos) where
