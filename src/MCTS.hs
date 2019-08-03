@@ -14,7 +14,7 @@ import Data.Ord
 import Control.Concurrent.Async
 import Control.Concurrent.MVar
 import System.IO
-import qualified PQueueQuick as PQ
+import qualified Data.PQueue.Max as MQ
 import qualified Data.Map as M
 
 -- | exploration/expolitation are coefficients for the UCB funtion
@@ -53,14 +53,14 @@ instance Eq PrioAction where
   mc1 == mc2 = (fst $! action' $! mc2) == (fst $! action' $! mc1)
 
 instance Ord PrioAction where
-  compare mc1 mc2 = compare (priority $! mc2) (priority $! mc1)
+  compare mc1 mc2 = compare (priority $! mc1) (priority $! mc2)
 
 -- | Terminals are states with a known value
 --   Trunks are states with fully evaluated children
 --   Buds are states where some children have not yet been evaluated
 data MCActions = Terminal Value [MCAction]
                | forall gs. GameState gs => Bud [MCAction] [(String, gs)]
-               | Trunk (PQ.PQueue PrioAction) [MCAction]
+               | Trunk (MQ.MaxQueue PrioAction) [MCAction]
                | InertTerminal Value
 
 -- | Defines a preference over nodes
@@ -129,9 +129,9 @@ instance SolvedGameState MCSolvedGame where
             str <- lessevilMCTS mcParams gameState $ map fst actions'
             return (str, fromJust $ lookup str actions')
       best (MCNode {children = Trunk nonterminals []}) = return $
-        objective (comparing $! nodeValue . snd) $ map action' $ PQ.toAscList nonterminals
+        objective (comparing $! nodeValue . snd) $ map action' $ MQ.toList nonterminals
       best (MCNode {children = Trunk nonterminals terminals}) = do
-        let bestnt = objective (comparing $ nodeValue . snd) $ map action' $ PQ.toAscList nonterminals
+        let bestnt = objective (comparing $ nodeValue . snd) $ map action' $ MQ.toList nonterminals
             bestter = objective (comparing $ nodeValue . snd) terminals
             ternv@(NodeValue v _) = nodeValue $ snd bestter
             takent = case player' of
@@ -161,7 +161,7 @@ rolloutNode !n !mcNode@(MCNode {gameState = gs}) !rand = (mcNode', rand') where
 mkActions :: MCActions -> [MCAction]
 mkActions (InertTerminal _) = []
 mkActions (Terminal _ xs) = xs
-mkActions (Trunk xs ys) = ys ++ (map action' $ PQ.toAscList xs)
+mkActions (Trunk xs ys) = ys ++ (map action' $ MQ.toList xs)
 mkActions (Bud solved unsolved) = solved ++ (map f unsolved) where
   f (str, gs) = (str, mkLeaf False gs)
 
@@ -195,7 +195,7 @@ mkTrunk !player !params@(MCParams{exploration, exploitation}) !totalsims !xs =
     maybeTrunk !([], !ys) = Terminal (objective $ map terminalval ys) ys
     maybeTrunk !(!xs, !ys) = if (or $ map ((==testval) . terminalval) ys)
       then Terminal testval (xs ++ ys)
-      else Trunk (PQ.fromList $ map evalfunc xs) ys
+      else Trunk (MQ.fromList $ map evalfunc xs) ys
 
 -- | Advances until the resulting function is called
 advanceuntil :: MCParams -> MCNode -> IO (IO MCNode)
@@ -275,7 +275,7 @@ advanceNode !params@(MCParams{numrollsSqrt, exploration, exploitation, uniform})
                           children = !(Trunk !nonterminals !terminals)}) !rand =
   (mgs {simulations = s', wins = w+val, children = f children'}, rand', val) where
     (PrioAction {action' = (!str, !child), subsims = !ss'}, !queue) =
-      fromJust $! PQ.extract nonterminals
+      fromJust $! MQ.maxView nonterminals
     !params' = params {uniform = False}
     !exploitation' = if uniform then 0 else exploitation
     !player' = player gameState
@@ -285,13 +285,13 @@ advanceNode !params@(MCParams{numrollsSqrt, exploration, exploitation, uniform})
     !nact = (str, child')
     !children' = case child' of
       MCNode {children = !(Terminal !tval _)} -> if tval == playerBound player' params
-        then Terminal tval (nact: (terminals ++ (map action' $ PQ.toAscList queue)))
+        then Terminal tval (nact: (terminals ++ (map action' $ MQ.toList queue)))
         else Trunk queue (nact:terminals)
-      otherwise -> Trunk (PQ.insert nprio queue) terminals where
+      otherwise -> Trunk (MQ.insert nprio queue) terminals where
         !priority = exploitation*(playerValue player')*(avgVal child') +
                     exploration*sqrt((log s)/ss')
         !nprio = PrioAction {priority, action'=nact, subsims = ss' + numrollsSqrt}
-    f ch@(Trunk !q' nt') = if isNothing $! PQ.extract q'
+    f ch@(Trunk !q' nt') = if isNothing $! MQ.maxView q'
       then Terminal (objective $ map (fromJust . terminalVal . snd) nt') nt'
       else ch
     f ch = ch
@@ -372,7 +372,7 @@ mtmctsSolver n mtParams gs = MTMCSolvedGame {mtParams, mtNodes = map (mkLeaf Fal
 lessevilMCTS :: GameState a => MCParams -> a -> [String] -> IO String
 lessevilMCTS params gs strs = do
   MCNode {children = (Trunk nonterminals _)} <- timedadvance (params {inert = True}) $ mkLeaf True gs
-  let valids = filter (\(str, _) -> elem str strs) $ map action' $ PQ.toAscList nonterminals
+  let valids = filter (\(str, _) -> elem str strs) $ map action' $ MQ.toList nonterminals
       objective = playerObjectiveBy (player gs) (comparing $ nodeValue . snd)
   return $ fst $ objective valids
 

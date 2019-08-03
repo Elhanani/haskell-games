@@ -29,6 +29,7 @@ dependencies:
 - random
 - async
 - time
+- pqueue
 - split
 
 library:
