@@ -44,7 +44,7 @@ class Monad m => Cache m r k v where
   readCache :: r -> k -> m (Maybe v)
   readCacheDefault :: r -> k -> v -> m v
   writeCache :: r -> k -> v -> m ()
-  filterCache :: r -> (k -> v -> Bool) -> m ()
+  filterCache :: r -> (k -> v -> Bool) -> m r
 
   readCacheDefault !r !k dv = do
     !mv <- readCache r k
@@ -60,7 +60,7 @@ instance Cache Identity (NoCacheRef k v) k v where
   readCache _ _ = return Nothing
   readCacheDefault _ _ a = return a
   writeCache _ _ _ = return ()
-  filterCache _ _ = return ()
+  filterCache _ _ = return NoCacheRef
 
 runNoCache :: (Identity (NoCacheRef k v) -> k -> Identity v) -> k -> v
 runNoCache f k = runIdentity $ f (return NoCacheRef) k
@@ -74,7 +74,7 @@ instance (Ord k) => Cache (State (M.Map k v)) (MapCacheRef k v) k v where
   readCache _ !k = get >>= return . (M.lookup k)
   readCacheDefault _ !k !v = get >>= return . (M.findWithDefault v k)
   writeCache _ !k !v = get >>= put . (M.insert k v)
-  filterCache _ !f = get >>= put . (M.filterWithKey f)
+  filterCache _ !f = get >>= put . (M.filterWithKey f) >> return MapCacheRef
 
 mapSolver :: (State (M.Map k v) (MapCacheRef k v) -> k ->
               State (M.Map k v) v) -> M.Map k v -> k -> (v, M.Map k v)
@@ -89,7 +89,7 @@ instance (Hashable k, Eq k) => Cache (State (H.HashMap k v)) (HashMapCacheRef k 
   readCache _ !k = get >>= return . (H.lookup k)
   readCacheDefault _ !k !v = get >>= return . (H.lookupDefault v k)
   writeCache _ !k !v = get >>= put . (H.insert k v)
-  filterCache _ !f = get >>= put . (H.filterWithKey f)
+  filterCache _ !f = get >>= put . (H.filterWithKey f) >> return HashMapCacheRef
 
 hashMapSolver :: (State (H.HashMap k v) (HashMapCacheRef k v) -> k ->
                   State (H.HashMap k v) v) -> H.HashMap k v -> k -> (v, H.HashMap k v)
@@ -125,6 +125,7 @@ instance (Hashable k, Eq k, Monad m, MA.MArray a (Maybe (k, v)) m) =>
               if isNothing current then return () else let Just (k, v) = current in
                 if f k v then return () else MA.writeArray singleArray (mod n singleSize) Nothing
     mapM_ g [0..singleSize-1]
+    return ref
 
 
 singleHashCacheST :: SingleHashRef A.Array k v ->

@@ -1,10 +1,11 @@
 {-# LANGUAGE BangPatterns, NamedFieldPuns #-}
 
+module Connect4 (connect4game) where
+
 import Data.List
 import Data.Maybe
 import SolverDefs
 import Data.Hashable
-import MCTS
 import qualified Data.Array as A
 
 data Square = Ex | Oh | None deriving Eq
@@ -115,29 +116,10 @@ mkState !gs@(Board {content, heights, totalmoves, numactions', identifier}) !col
       else if draw then Just 0 else Nothing
 
 -- | An empty board
-initial :: BoardState
-initial = Board {content = A.listArray ((0,0), (5, 6)) $ repeat None
-               , heights = A.listArray (0, 6) $ repeat 0
-               , totalmoves = 0
-               , terminal' = Nothing
-               , numactions' = 7
-               , identifier = 0}
-
--- main = do
---   let x = mtmctsSolver 3 defaultMCParams initial
---   print $ map simulations $ mtNodes x
---   f <- think x
---   getLine
---   y <- f
---   print $ map simulations $ mtNodes y
-
-main = putStrLn "" >> (humanInteraction initial $ mtmctsSolver 2 $ defaultMCParams {duration=1000})
-
--- solver1 = mtmctsSolver 3 $ defaultMCParams {background = False, duration = 1000}
--- solver2 = mctsSolver $ defaultMCParams {background = False, duration = 1000}
--- solver3 = mctsSolver $ defaultMCParams
--- main = putStrLn "\n\n\n" >> interaction initial solver3 solver3
-
--- main = do
---   x <- multitimed initial 2500
---   print $ sum $ map snd x
+connect4game :: BoardState
+connect4game = Board {content = A.listArray ((0,0), (5, 6)) $ repeat None
+                    , heights = A.listArray (0, 6) $ repeat 0
+                    , totalmoves = 0
+                    , terminal' = Nothing
+                    , numactions' = 7
+                    , identifier = 0}

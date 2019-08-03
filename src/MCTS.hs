@@ -1,6 +1,7 @@
 {-# LANGUAGE ExistentialQuantification, BangPatterns, NamedFieldPuns, RankNTypes #-}
 
-module MCTS (MCParams(..), defaultMCParams,
+module MCTS (module SolverDefs,
+             MCParams(..), defaultMCParams,
              mctsSolver, mtmctsSolver,
              lessevilMCTS, lessevilMTMCTS) where
 

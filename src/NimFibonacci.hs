@@ -1,18 +1,18 @@
 {-# LANGUAGE NamedFieldPuns #-}
 
+module NimFibonacci (nimFibonacciGame, nimFibonacciSolver) where
+
 import SolverDefs
 import Data.List
 import Data.Ratio
-import System.Environment
-import System.Random
 
 data NimGame = Nim {player' :: Player,
                     limit :: Integer,
                     pile :: Integer} deriving Eq
 
 instance Show NimGame where
-  show (Nim {player' = Maximizer, pile = 0}) = "Second player has no more moves.\nFirst player wins!"
-  show (Nim {player' = Minimizer, pile = 0}) = "First player has no more moves.\nSecond player wins!"
+  show (Nim {player' = Maximizer, pile = 0}) = "First player has no more moves.\nSecond player wins!"
+  show (Nim {player' = Minimizer, pile = 0}) = "Second player has no more moves.\nFirst player wins!"
   show (Nim {limit, pile, player'}) = pilestr ++ playerstr ++ movestr where
     pilestr = "There are " ++ (show pile) ++ " stones in the pile.\n"
     movestr = if limit < pile
@@ -56,21 +56,8 @@ nimsolver2 (Nim {pile = p, limit = l}) = if null wins then "1" else show $ head 
   wins = trivial ++ filter isgood [q,q-1..1]
   isgood n = (last $ zeckendorf $ p-n) > 2*n
 
-initial :: Integer -> NimGame
-initial p = Nim {player' = Maximizer, limit = p-1, pile = p}
+nimFibonacciGame :: Integer -> NimGame
+nimFibonacciGame p = Nim {player' = Maximizer, limit = p-1, pile = p}
 
--- | Just sets random parameters for the initial state
-boundary :: [Integer] -> [Integer]
-boundary [] = boundary [100]
-boundary [n] = boundary [n, quot n 2]
-boundary xs = [minimum xs, maximum xs]
-
-main = do
-  args <- getArgs
-  rand <- newStdGen
-  let [b1, b2] = boundary $ map read $ args
-      p = head $ randomRs (b1, b2) rand
-  putStrLn $ "Welcome to Fibonacci Nim!"
-  putStrLn $ "On the first turn you can take as much stones as you wish (excpet all of them)"
-  putStrLn $ "On each subsequent turn, you are allowed to take at most twice the amount taken the previous turn\n\n"
-  interaction (initial p) humanSolver $ statelessSolver (return . nimsolver2)
+nimFibonacciSolver :: NimGame -> StatelessSolvedGame
+nimFibonacciSolver = statelessSolver (return . nimsolver2)

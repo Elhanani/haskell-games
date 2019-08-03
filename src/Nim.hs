@@ -1,11 +1,11 @@
+module Nim (nimGame, nimSolver) where
+
 import SolverDefs
 import Data.List
-import System.Environment
 import Data.Bits
-import System.Random
 import qualified Data.Set as Set
 
-newtype NimGame = Nim (Player, [Integer]) deriving Eq
+newtype NimGame = Nim (Player, [Integer])
 
 instance Show NimGame where
   show (Nim (player', piles)) = (unwords $ map show piles) ++ message where
@@ -25,25 +25,15 @@ instance GameState NimGame where
 movename :: (Integer, Integer) -> String
 movename (n, m) = (show n) ++ "-" ++ (show $ n-m)
 
-nimSolver :: NimGame -> IO String
-nimSolver gs@(Nim (_, piles)) = do
+nimMove :: NimGame -> IO String
+nimMove gs@(Nim (_, piles)) = do
     let nimsum = foldr (xor) 0 piles
         moveset = [(n, m) | n <- piles, m <- [0..n-1]]
         goodmove = if nimsum == 0 then const True else (\(n, m) -> nimsum == xor n m)
     randomAction $ fmap movename $ filter goodmove moveset
 
--- | Just sets random parameters for the initial state
-pilemaker :: StdGen -> [String] -> [Integer]
-pilemaker rand [] = pilemaker rand [show $ head $ (randomRs (3, 10) rand :: [Int])]
-pilemaker rand [n] = pilemaker rand [n, show $ 10 + quot 100 (read n)]
-pilemaker rand [n, h] = map toInteger $ take (read n) $ tail $ (randomRs (1, read h) rand :: [Int])
-pilemaker _ strs = map read strs
+nimGame :: [Integer] -> NimGame
+nimGame x = Nim (Maximizer, x)
 
-main = do
-  args <- getArgs
-  rand <- newStdGen
-  let initial = Nim (Maximizer, pilemaker rand args)
-  putStrLn $ "\n\nWelcome to Nim!"
-  putStrLn $ "Take any amount of stones from any pile, last player to move wins!"
-  putStrLn $ "To take 'y' stones from a pile of size 'x', type 'x-y'\n\n"
-  interaction initial humanSolver $ statelessSolver nimSolver
+nimSolver :: NimGame -> StatelessSolvedGame
+nimSolver = statelessSolver nimMove

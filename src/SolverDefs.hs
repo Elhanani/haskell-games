@@ -4,9 +4,9 @@
            , BangPatterns
              #-}
 
-module SolverDefs (Value, GameState(..), SolvedGameState(..), Player(..),
-                   playerValue, playerObjective, otherPlayer,
-                   randomAction, statelessSolver, randomSolver, humanSolver,
+module SolverDefs (Value, Player(..), GameState(..), SolvedGameState(..),
+                   playerValue, playerObjective, otherPlayer, randomAction,
+                   StatelessSolvedGame, statelessSolver, randomSolver, humanSolver,
                    interaction, humanInteraction) where
 
 import System.Random

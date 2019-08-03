@@ -1,11 +1,11 @@
 {-# LANGUAGE NamedFieldPuns #-}
 
+module NimEuclidean (nimEuclideanGame, nimEuclideanSolver) where
+
 import SolverDefs
 import Data.List
 import Data.Ratio
 import Control.Monad.State
-import System.Environment
-import System.Random
 
 
 -- | The message is an artifact of a previous computation.
@@ -14,9 +14,6 @@ data NimGame = Nim {player' :: Player,
                     p1 :: Integer,
                     p2 :: Integer}
 
--- | This produces correct results from the game's perspective, but may show the wrong thing.
-instance Eq NimGame where
-  Nim {player'=f1, p1=p11, p2=p12} == Nim {player'=f2, p1=p21, p2=p22} = (f1, p11, p12) == (f2, p21, p22)
 
 gameOver :: Integer -> Player -> String
 gameOver n player' = "Only one pile left: " ++ (show n) ++ movestr ++ winstr ++ "\n" where
@@ -58,20 +55,10 @@ instance GameState NimGame where
       msg (big, q, small) = (show big) ++ " - " ++ (show q) ++ "*" ++ (show small) ++
                              " = " ++ (show $ big-q*small) ++ "\n"
 
-initial :: Integer -> Integer -> NimGame
-initial p1 p2 = Nim {player' = Maximizer, message = "", p1, p2}
+-- | initial state
+nimEuclideanGame :: Integer -> Integer -> NimGame
+nimEuclideanGame p1 p2 = Nim {player' = Maximizer, message = "", p1, p2}
 
--- | Just sets random parameters for the initial state
-boundary :: [Integer] -> [Integer]
-boundary [] = boundary [10000]
-boundary [n] = boundary [n, quot n 10]
-boundary xs = [minimum xs, maximum xs]
-
-main = do
-  args <- getArgs
-  rand <- newStdGen
-  let [b1, b2] = boundary $ map read $ args
-      (p1:p2:_) = take 2 $ randomRs (b1, b2) rand
-  putStrLn $ "Welcome to Euclidian Nim!"
-  putStrLn $ "Legal moves are taking integer multiples of the small pile out of the big pile\n\n"
-  interaction (initial p1 p2) humanSolver $ statelessSolver (return . nimsolver)
+-- | solver
+nimEuclideanSolver :: NimGame -> StatelessSolvedGame
+nimEuclideanSolver = statelessSolver (return . nimsolver)

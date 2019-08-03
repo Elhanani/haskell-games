@@ -1,18 +1,14 @@
+module TTT (tictactoe) where 
+
 import SolverDefs
-import Minmax
-import Alphabeta
 import Data.List.Split
 import Data.Maybe
 import Data.Hashable
 import qualified Data.Array as A
 
 
-data Square = Ex | Oh | None deriving (Eq, Ord, Enum)
+data Square = Ex | Oh | None deriving Eq
 type Miniboard = A.Array Int Square
-
-
-instance Hashable Square where
-  hashWithSalt n = (hashWithSalt n) . fromEnum
 
 instance Hashable BoardState where
   hashWithSalt n (Board (_, _, h, _)) = hashWithSalt n h
@@ -87,10 +83,5 @@ mkState gs@(Board (l, b, h, v)) n = if b A.! n /= None then Nothing else let
   in if winner then next $ winval else if l == 8 then next (Just 0) else next Nothing
 
 -- | Initial state
-initial :: BoardState
-initial = Board (0, A.listArray (0, 8) $ repeat None, 0, Nothing)
-
-main = putStrLn "\n" >> interaction initial solver solver where
-  solver = ordMinmaxSolver
-  -- solver = hashMinmaxSolver
-  -- solver = singleLRUMinmaxSolver 10000
+tictactoe :: BoardState
+tictactoe = Board (0, A.listArray (0, 8) $ repeat None, 0, Nothing)

@@ -1,16 +1,16 @@
 {-# LANGUAGE BangPatterns #-}
-{-# OPTIONS_GHC -O2 #-}
+
+module UTT (ultimateTTT) where
 
 import SolverDefs
-import MCTS
 import Data.List
 import Data.Maybe
 import Data.List.Split
 import Data.Either
-import System.Random
 import qualified Data.Array as A
 
-
+-- Translate into uarray of ints in trinary representation
+-- Can store 3 miniboards in one integer
 data Square = Ex | Oh | None deriving (Eq, Ord)
 type Miniboard = A.Array Int Square
 type MiniPlus = Either Square (Int, Miniboard)
@@ -118,8 +118,8 @@ mkState !gs@(Board (!player', !bb, _, _)) !x !y = Board (otherPlayer player', nb
         else if bigdraw then Just 0 else Nothing
       else if draw && bigdraw then Just 0 else Nothing
 
-initial :: BoardState
-initial = Board (Maximizer, array8 $ Right $ (0, array8 None), Nothing, Nothing) where
+ultimateTTT :: BoardState
+ultimateTTT = Board (Maximizer, array8 $ Right $ (0, array8 None), Nothing, Nothing) where
   array8 x = A.listArray (0, 8) $ repeat x
 
 -- | Symmetries for the first move
@@ -133,28 +133,3 @@ symmetries = [["e5"], ["d4", "f4", "d6", "f6"], ["e4", "d5", "f5", "e6"],
               ["d1", "f1", "a4", "a6", "i4", "i6", "d9", "f9"],
               ["d2", "f2", "b4", "b6", "h4", "h6", "d8", "f8"],
               ["d3", "f3", "c4", "c6", "g4", "g6", "d7", "f7"]]
-
--- main = putStrLn "\n" >> interaction initial randomSolver randomSolver
-
-mymctssolver = mctsSolver defaultMCParams {background=False}
-
--- main = putStrLn " ">> humanInteraction initial mymctssolver
-
-main = putStrLn "\n\n\n" >> interaction initial mymctssolver mymctssolver >> main
-
-
--- main = do
---   x <- multitimed initial 2500
---   print $ sum $ map snd x
-
--- main = do
---   rand <- newStdGen
---   let newinit = removeSymmetries symmetries rand initial
---   x <- multitimed initial 2500
---   print $ sum $ map snd x
-
--- main = singlemed initial 1500 >>= print
-
--- main = do
---   rand <- newStdGen
---   print $ rollouts 100000 initial rand

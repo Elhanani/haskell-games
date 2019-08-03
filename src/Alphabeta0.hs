@@ -1,8 +1,9 @@
 {-# LANGUAGE ExistentialQuantification, NamedFieldPuns, RankNTypes, BangPatterns #-}
 
-module Alphabeta where --()
+module Alphabeta0 where --()
 
 import SolverDefs
+import Cache
 import Data.Maybe
 import Data.List
 import System.Random
@@ -31,7 +32,7 @@ type ABAction gs = (String, ABNode gs)
 data ABNode gs = ABNode {gameState :: gs,
                          value :: ABValue,
                          sufficient :: Maybe (ABAction gs),
-                         unknowns :: [(ABAction gs)],
+                         unknowns :: [ABAction gs],
                          knowns :: [ABAction gs],
                          worst :: [ABAction gs],
                          best :: [ABAction gs]}
