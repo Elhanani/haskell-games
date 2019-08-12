@@ -140,11 +140,16 @@ instance GameState gs => GameState (MCSolvedGame gs) where
     MCCache cachelist = mcCache mcsg
     mkAction (str, gs1) = (str, mcsg {gameState = gs1, mcCache = cache str})
     cache str = MCCache (filter ((f str) . fst) cachelist)
-    f str = maybe (const True) id $ lookup str $ actionfilters gs0
+    f str = fromMaybe (const True) $ lookup str $ actionfilters gs0
 
 -- | Initialize cache in IO monad
 cache2io :: (HGS gs) => MCCache gs -> Int -> IO (IOCache gs)
 cache2io (MCCache cachelist) n = HT.fromListWithSizeHint (n + length cachelist) cachelist
+
+-- | Find in cache or create new
+getNode :: (HGS gs) => IOCache gs -> gs -> IO (MCNode gs)
+getNode cache gs = fmap (fromMaybe (mkLeaf gs) )$ HT.lookup cache gs
+  where mkLeaf = undefined -- needs to be of type :: gs -> IO (MCNode gs)
 
 instance (HGS gs) => SolvedGameState (MCSolvedGame gs) where
   action (MCSolvedGame {gameState, mcCache, mcParams}) = do
@@ -154,16 +159,16 @@ instance (HGS gs) => SolvedGameState (MCSolvedGame gs) where
     worker <- advanceUntil mcParams cache gameState
     threadDelay $ 1000 * duration mcParams
     worker
-    Just rootnode <- HT.lookup cache gameState
-    childnodes <- mapM (fmap fromJust . HT.lookup cache) $ children
+    rootnode <- getNode cache gameState
+    childnodes <- mapM (getNode cache) children
     let bestgs = bestactions mcParams (gameState, rootnode) $ zip children childnodes
         best = zip (map (\gs -> fromJust $ lookup gs $ map swap $ actions gs) bestgs) bestgs
     (str, newgs) <- if length bestgs == 1 then return $ head best else do
-      let f = maybe (lessevilMCTS mcParams) id $ lessevil mcParams
+      let f = fromMaybe (lessevilMCTS mcParams) $ lessevil mcParams
       beststr <- f gameState $ map fst best
       return $ (beststr, fromJust $ lookup beststr gsactions)
     cachelist <- HT.toList cache
-    let f = maybe (const True) id $ lookup str $ actionfilters gameState
+    let f = fromMaybe (const True) $ lookup str $ actionfilters gameState
         newcache = MCCache (filter (f . fst) cachelist)
     return (str, MCSolvedGame {mcParams, gameState = newgs, mcCache = newcache})
   think (MCSolvedGame {gameState, mcParams, mcCache}) = do
@@ -178,8 +183,12 @@ instance (HGS gs) => SolvedGameState (MCSolvedGame gs) where
 
 -- | Selects the best actions to play
 defaultBestactions :: HGS gs => (gs, MCNode gs) -> [(gs, MCNode gs)] -> [gs]
-defaultBestactions (!gs, Terminal !val) !children = undefined
-defaultBestactions _ _ = undefined
+defaultBestactions (!gs, Terminal !val) !children = filter f $! map snd $! actions gs where
+  f ns = g $ fromJust $ lookup ns children
+  g (!Terminal !value) = value == val
+  g _ = False
+defaultBestactions (!gs, Trunk {sims, wins, moveq}) !children = undefined
+defaultBestactions _ ((gs, _):_) = [gs]
 
 -- | Advances until the resulting function is called
 advanceUntil :: HGS gs => MCParams -> IOCache gs -> gs -> IO (IO ())
@@ -195,7 +204,7 @@ advanceUntil !params !cache !gs = if background $! params then do
         Just node <- HT.lookup cache gs
         let !newrolls = floor ((totalsim node) / (simsperroll params)) + numrollsI params
             !params' = params {numrollsI = newrolls, numrollsSqrt = sqrt $! fromIntegral newrolls}
-        replicateM_ (advancechunks params) $ advancenode params' cache gs
+        replicateM_ (advancechunks params) $ advancestate params' cache gs
         hFlush stdout -- why?
         finish <- readMVar mfinish
         if finish || stopcond node
@@ -207,8 +216,10 @@ advanceUntil !params !cache !gs = if background $! params then do
     wait solver
   else return $ return ()
 
-advancenode :: HGS gs => MCParams -> IOCache gs -> gs -> IO ()
-advancenode !params !cache !gs = return undefined
+advancestate :: HGS gs => MCParams -> IOCache gs -> gs -> IO Value
+advancestate !params !cache !gs = do
+  node <- getNode cache gs
+  return undefined
 
 {-
 
@@ -371,8 +382,8 @@ lessevilMCTS params gs strs = do
   worker <- advanceUntil (params {inert = True}) cache gs
   threadDelay $ 1000 * duration params
   worker
-  Just rootnode <- HT.lookup cache gs
-  childnodes <- mapM (fmap fromJust . HT.lookup cache) $ children
+  rootnode <- getNode cache gs
+  childnodes <- mapM (getNode cache) children
   let best = head $ bestactions params (gs, rootnode) $ zip children childnodes
   return $ fromJust $ lookup best $ map swap $ actions gs
 
