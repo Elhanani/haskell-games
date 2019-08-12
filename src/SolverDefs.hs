@@ -41,6 +41,8 @@ class (Show gs) => GameState gs where
   numactions :: gs -> Int
   -- | Maximal number of moves until the game finishes, or Nothing if unknown.
   maxdepth :: gs -> Maybe Int
+  -- | Filters for states where a particular move was taken
+  actionfilters :: gs -> [(String, gs -> Bool)]
   -- | Perform the move to get a new game state
   act :: gs -> String -> Maybe gs
   -- | The message to show when a user inputs "moves"
@@ -53,6 +55,7 @@ class (Show gs) => GameState gs where
   act g str = lookup str $ actions g
   showmoves g = "Possible moves are: " ++ (unwords $ map fst $ actions g)
   showhelp = showmoves
+  actionfilters = map (\(str, _) -> (str, const True)) . actions
 
 -- | A solved game state is a superclass of a game
 class (GameState gs) => SolvedGameState gs where

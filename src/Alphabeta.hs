@@ -82,3 +82,11 @@ findBest _ node@ABNode{unknowns=[], best=(_:_)} = node
 -- if sufficient exists and is as good as the requirement then do nothing
 -- if suffiecent doesn't exist (or not as good as required) deplete the unknowns
 -- if nothing is unknown then do nothing
+
+
+-- | Does alphabeta for a game which divides losing results by depth
+--   This means it will try to hold on as much as possible (allows opponent mistakes)
+--   Maybe there are better metrics than depth (maybe utilizes branching factor)
+--   The important thing is that the winning payout remains the same (for better pruning)
+lessevilAlphabeta :: GameState gs => ABParams gs -> gs -> [String] -> IO String
+lessevilAlphabeta = undefined

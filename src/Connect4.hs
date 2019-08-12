@@ -52,6 +52,10 @@ instance GameState BoardState where
   actions !gs@(Board {heights}) = [(movename n, mkState gs n) | n <- [0..6], (heights A.! n) < 6]
   numactions = numactions'
   maxdepth !gs = Just $! 9 - (totalmoves gs)
+  actionfilters !gs@(Board {totalmoves, heights}) =
+    [(movename n, f n) | n <- [0..6], (heights A.! n) < 6] where
+      f n (Board {content}) = content A.! (n, heights A.! n) ==
+        if mod totalmoves 2 == 0 then Ex else Oh
 
 -- | The array corresponding to the required positions needed to complete a win
 compsarr :: A.Array (Int, Int) [([(Int, Int)], [(Int, Int)])]

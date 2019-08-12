@@ -8,6 +8,9 @@
            , RankNTypes
              #-}
 
+-- | In retrospect this should probably be scrapped in favor of a tailored solutions
+--   i.e. (IO) HashTables exclusively for MCTS
+--   mutable STArray / immutable psqueues as LRU/cusomized cache for alpha beta
 module Cache (Cache(..), Hashable, HasInitial(..),
               NoCacheRef, runNoCache,
               MapCacheRef, mapSolver, MapState,
