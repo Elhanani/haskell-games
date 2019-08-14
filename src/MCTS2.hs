@@ -28,7 +28,7 @@ import qualified Data.PQueue.Max as MQ
 import qualified Data.Map as M
 import qualified Data.HashTable.IO as HT
 
-class (GameState gs, Eq gs, Hashable gs) => HGS gs
+class (GameState gs, Eq gs, Hashable gs, Ord gs) => HGS gs
 
 -- | exploration/expolitation are coefficients for the UCB funtion
 --   alpha, beta are values that will stop the search
@@ -62,7 +62,7 @@ data MCParams = MCParams
 
 defaultMCParams :: MCParams
 defaultMCParams = MCParams {exploitation = 1
-                          , exploration = sqrt 2
+                          , exploration = sqrt 8
                           , alpha = (-1)
                           , beta = 1
                           , duration = 1000
@@ -76,7 +76,7 @@ defaultMCParams = MCParams {exploitation = 1
                           , lessevil = Nothing
                           , extracache = 100000
                           , advancechunks = 100
-                          , bestactions = defaultBestactions}
+                          , bestactions = defaultBestactions 1}
 
 -- | Cache includes the proposed size for the allocated table.
 newtype MCCache gs = MCCache [(gs, MCNode gs)]
@@ -95,14 +95,15 @@ data MCSolvedGame gs =
 data MCNode gs =
      InertTerminal {-# UNPACK #-} !Value
    | Terminal {-# UNPACK #-} !Value
-   | Bud ![(gs, Value, Value)] ![gs]
+   | Bud ![(gs, (Value, Value))] ![gs]
    | Trunk {sims :: {-# UNPACK #-} !Value
           , wins :: {-# UNPACK #-} !Value
-          , moveq :: !(MQ.MaxQueue (PrioMove gs))}
+          , moveq :: !(MQ.MaxQueue (PrioMove gs))
+          , terminals :: [gs]
+          , norisk :: !Value}
 
 data PrioMove gs = PrioMove {priority :: {-# UNPACK #-} !Value
                            , subsims :: {-# UNPACK #-} !Value
-                           , subwins :: {-# UNPACK #-} !Value
                            , pmove :: !gs}
 
 instance Eq gs => Eq (PrioMove gs) where
@@ -113,19 +114,19 @@ instance Eq gs => Ord (PrioMove gs) where
 
 type IOCache gs = HT.CuckooHashTable gs (MCNode gs)
 
-playerBound :: Player -> MCParams -> Value
-playerBound !Maximizer = beta
-playerBound !Minimizer = alpha
-
-playerObjectiveBy :: (Foldable t) => Player -> (a -> a -> Ordering) -> t a -> a
-playerObjectiveBy !Maximizer = maximumBy
-playerObjectiveBy !Minimizer = minimumBy
+-- playerBound :: Player -> MCParams -> Value
+-- playerBound !Maximizer = beta
+-- playerBound !Minimizer = alpha
+--
+-- playerObjectiveBy :: (Foldable t) => Player -> (a -> a -> Ordering) -> t a -> a
+-- playerObjectiveBy !Maximizer = maximumBy
+-- playerObjectiveBy !Minimizer = minimumBy
 
 -- | Getter function from a terminal
-terminalVal :: MCNode gs -> Maybe Value
-terminalVal !(Terminal !v) = Just v
-terminalVal !(InertTerminal !v) = Just v
-terminalVal _ = Nothing
+-- terminalVal :: MCNode gs -> Maybe Value
+-- terminalVal !(Terminal !v) = Just v
+-- terminalVal !(InertTerminal !v) = Just v
+-- terminalVal _ = Nothing
 
 instance Show gs => Show (MCSolvedGame gs) where
   show = show . gameState
@@ -181,14 +182,33 @@ instance (HGS gs) => SolvedGameState (MCSolvedGame gs) where
       cachelist <- HT.toList cache
       return MCSolvedGame {gameState, mcParams, mcCache = MCCache cachelist}
 
--- | Selects the best actions to play
-defaultBestactions :: HGS gs => (gs, MCNode gs) -> [(gs, MCNode gs)] -> [gs]
-defaultBestactions (!gs, Terminal !val) !children = filter f $! map snd $! actions gs where
+-- | Selects the best actions to play using lcb
+defaultBestactions :: HGS gs => Value -> (gs, MCNode gs) -> [(gs, MCNode gs)] -> [gs]
+defaultBestactions _ (!gs, Terminal !val) !children = filter f $! map snd $! actions gs where
   f ns = g $ fromJust $ lookup ns children
   g (!Terminal !value) = value == val
   g _ = False
-defaultBestactions (!gs, Trunk {sims, wins, moveq}) !children = undefined
-defaultBestactions _ ((gs, _):_) = [gs]
+defaultBestactions !ratio (!gs, Trunk {sims, moveq, terminals, norisk}) !children = res where
+  moves = MQ.toList moveq
+  nodes = map (fromJust . flip lookup children . pmove) moves
+  pl = player gs
+  f = confidence pl False 1 ratio sims
+  trunks = zip (zipWith f (map Just $ moves) nodes) (map pmove moves)
+  (bestval, bestgame) = maximum trunks
+  res = if bestval > norisk then [bestgame] else terminals
+
+confidence :: HGS gs => Player -> Bool -> Value -> Value ->
+                        Value -> Maybe (PrioMove gs) -> MCNode gs -> Value
+confidence player upper c1 c2 num move node = c1 * p1 * mean node + c2 * p2 * stdv move where
+  !maximizer = player == Maximizer
+  !p1 = if maximizer then 1 else -1
+  !p2 = if maximizer == upper then 1 else -1
+  mean (!InertTerminal !val) = val
+  mean (!Terminal !val) = val
+  mean (!Bud !leaves _) = (sum $ map (fst . snd) leaves) / (sum $ map (snd . snd) leaves)
+  mean (!Trunk {sims, wins}) = wins/sims
+  stdv (!Just (!PrioMove {subsims})) = sqrt $ (log num) / (subsims)
+  stdv (!Nothing) = 0
 
 -- | Advances until the resulting function is called
 advanceUntil :: HGS gs => MCParams -> IOCache gs -> gs -> IO (IO ())
