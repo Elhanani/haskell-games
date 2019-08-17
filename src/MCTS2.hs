@@ -100,7 +100,7 @@ data MCNode gs =
           , wins :: {-# UNPACK #-} !Value
           , moveq :: !(MQ.MaxQueue (PrioMove gs))
           , terminals :: [gs]
-          , norisk :: !Value}
+          , worstcase :: !Value} -- this can be meaningful with lcb as well.
 
 data PrioMove gs = PrioMove {priority :: {-# UNPACK #-} !Value
                            , subsims :: {-# UNPACK #-} !Value
@@ -114,10 +114,10 @@ instance Eq gs => Ord (PrioMove gs) where
 
 type IOCache gs = HT.CuckooHashTable gs (MCNode gs)
 
--- playerBound :: Player -> MCParams -> Value
--- playerBound !Maximizer = beta
--- playerBound !Minimizer = alpha
---
+playerBound :: Player -> MCParams -> Value
+playerBound !Maximizer = beta
+playerBound !Minimizer = alpha
+
 -- playerObjectiveBy :: (Foldable t) => Player -> (a -> a -> Ordering) -> t a -> a
 -- playerObjectiveBy !Maximizer = maximumBy
 -- playerObjectiveBy !Minimizer = minimumBy
@@ -149,8 +149,7 @@ cache2io (MCCache cachelist) n = HT.fromListWithSizeHint (n + length cachelist) 
 
 -- | Find in cache or create new
 getNode :: (HGS gs) => IOCache gs -> gs -> IO (MCNode gs)
-getNode cache gs = fmap (fromMaybe (mkLeaf gs) )$ HT.lookup cache gs
-  where mkLeaf = undefined -- needs to be of type :: gs -> IO (MCNode gs)
+getNode cache gs = fmap (fromMaybe (Bud [] $ map snd $ actions gs) )$ HT.lookup cache gs
 
 instance (HGS gs) => SolvedGameState (MCSolvedGame gs) where
   action (MCSolvedGame {gameState, mcCache, mcParams}) = do
@@ -188,15 +187,16 @@ defaultBestactions _ (!gs, Terminal !val) !children = filter f $! map snd $! act
   f ns = g $ fromJust $ lookup ns children
   g (!Terminal !value) = value == val
   g _ = False
-defaultBestactions !ratio (!gs, Trunk {sims, moveq, terminals, norisk}) !children = res where
+defaultBestactions !ratio (!gs, Trunk {sims, moveq, terminals, worstcase}) !children = res where
   moves = MQ.toList moveq
   nodes = map (fromJust . flip lookup children . pmove) moves
   pl = player gs
   f = confidence pl False 1 ratio sims
   trunks = zip (zipWith f (map Just $ moves) nodes) (map pmove moves)
   (bestval, bestgame) = maximum trunks
-  res = if bestval > norisk then [bestgame] else terminals
+  res = if bestval > worstcase then [bestgame] else terminals
 
+-- | UCB or LCB - used to rate the moves
 confidence :: HGS gs => Player -> Bool -> Value -> Value ->
                         Value -> Maybe (PrioMove gs) -> MCNode gs -> Value
 confidence player upper c1 c2 num move node = c1 * p1 * mean node + c2 * p2 * stdv move where
@@ -205,7 +205,7 @@ confidence player upper c1 c2 num move node = c1 * p1 * mean node + c2 * p2 * st
   !p2 = if maximizer == upper then 1 else -1
   mean (!InertTerminal !val) = val
   mean (!Terminal !val) = val
-  mean (!Bud !leaves _) = (sum $ map (fst . snd) leaves) / (sum $ map (snd . snd) leaves)
+  mean (!Bud !leaves _ ) = (sum $ map (fst . snd) leaves) / (sum $ map (snd . snd) leaves)
   mean (!Trunk {sims, wins}) = wins/sims
   stdv (!Just (!PrioMove {subsims})) = sqrt $ (log num) / (subsims)
   stdv (!Nothing) = 0
@@ -224,7 +224,7 @@ advanceUntil !params !cache !gs = if background $! params then do
         Just node <- HT.lookup cache gs
         let !newrolls = floor ((totalsim node) / (simsperroll params)) + numrollsI params
             !params' = params {numrollsI = newrolls, numrollsSqrt = sqrt $! fromIntegral newrolls}
-        replicateM_ (advancechunks params) $ advancestate params' cache gs
+        replicateM_ (advancechunks params) $ advanceState params' cache gs
         hFlush stdout -- why?
         finish <- readMVar mfinish
         if finish || stopcond node
@@ -236,51 +236,51 @@ advanceUntil !params !cache !gs = if background $! params then do
     wait solver
   else return $ return ()
 
-advancestate :: HGS gs => MCParams -> IOCache gs -> gs -> IO Value
-advancestate !params !cache !gs = do
+advanceState :: HGS gs => MCParams -> IOCache gs -> gs -> IO ()
+advanceState !params !cache !gs = do
   node <- getNode cache gs
   return undefined
 
+
+advanceNode :: HGS gs => MCParams -> IOCache gs -> MCNode gs -> gs -> IO Value
+advanceNode !params _ (InertTerminal !val) _ = return $ val * numrollsSqrt params
+advanceNode !params _ (Terminal !val) _ = return $ val * numrollsSqrt params
+advanceNode !params !cache (Bud !done !(ngs:rest)) _ = do
+  rand <- newStdGen
+  let !n = numrollsI params
+      !sqrtn = numrollsSqrt params
+      !w = (fst $ rollouts n ngs rand) / sqrtn
+      !node = Bud ((ngs, (w, sqrtn)):done) rest
+  HT.insert cache ngs node
+  return w
+advanceNode !params !cache (Bud !done []) !gs =
+  advanceNode params cache (Trunk {sims, wins, moveq, terminals, worstcase}) gs where
+    !wins = sum $ map (fst . snd) done
+    !sims = sum $ map (snd . snd) done
+    !moveq = MQ.fromList $ map (leaf2prio gs params) done
+    !terminals = []
+    !worstcase = playerBound (otherPlayer $ player gs) params
+
+advanceNode params cache (Trunk {}) gs = do
+  return undefined
+
+leaf2prio :: (HGS gs) => gs -> MCParams -> (gs, (Value, Value)) -> PrioMove gs
+leaf2prio gs params (pmove, (subsims, wins)) = PrioMove {priority, subsims, pmove} where
+  !c1 = exploitation params
+  !c2 = exploration params
+  !absval = c1 * (wins / subsims) +
+            c2 * (sqrt $ (log $ fromIntegral $ numactions gs) / subsims)
+  !priority = case player gs of
+    Maximizer -> absval
+    Minimizer -> -absval
+
+
 {-
+-- reminder
+data PrioMove gs = PrioMove {priority :: {-# UNPACK #-} !Value
+                           , subsims :: {-# UNPACK #-} !Value
+                           , pmove :: !gs}
 
--- | Originally, this was "best"
---
---   newnode <- timedadvance mcParams node
---   toMCSolvedGame <$> best newnode
---   where
---     best (MCNode {children = Terminal v terminals}) = do
---       let actions' = filter ((== Just v) . terminalVal . snd) terminals
---       if v == playerBound player' mcParams
---         then return $ head actions'
---         else do
---           str <- lessevilMCTS mcParams gameState $ map fst actions'
---           return (str, fromJust $ lookup str actions')
---     best (MCNode {children = Trunk nonterminals []}) = return $
---       objective (comparing $! nodeValue . snd) $ map action' $ MQ.toList nonterminals
---     best (MCNode {children = Trunk nonterminals terminals}) = do
---       let bestnt = objective (comparing $ nodeValue . snd) $ map action' $ MQ.toList nonterminals
---           bestter = objective (comparing $ nodeValue . snd) terminals
---           ternv@(NodeValue v _) = nodeValue $ snd bestter
---           takent = case player' of
---             Maximizer -> ternv < (nodeValue $ snd bestnt)
---             Minimizer -> ternv > (nodeValue $ snd bestnt)
---       if takent then return bestnt
---         else do
---           let actions' = filter ((== Just v) . terminalVal . snd) terminals
---           str <- lessevilMCTS mcParams gameState $ map fst actions'
---           return (str, fromJust $ lookup str actions')
---     objective = playerObjectiveBy $! player'
---     player' = player gameState
---     toMCSolvedGame (str, mcNode) = (str, MCSolvedGame {mcParams, mcNode})
-
-
--- | Perform rollouts and update the node
-rolloutNode :: RandomGen rg => Int -> MCNode -> rg -> (MCNode, rg)
-rolloutNode !n !mcNode@(MCNode {gameState = gs}) !rand = (mcNode', rand') where
-  !sqrtn = sqrt $! fromIntegral n
-  !mcNode' = mcNode {simulations = (simulations mcNode) + sqrtn,
-                     wins = (wins mcNode) + (w/sqrtn)}
-  (!w, !rand') = rollouts n gs rand
 
 -- | Get actions from actions types
 mkActions :: MCActions -> [MCAction]
