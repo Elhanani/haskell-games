@@ -269,11 +269,13 @@ advanceNode !params@(MCParams {numrollsSqrt, numrollsI}) !cache !gs = do
             GT -> ([pmove], val)
             EQ -> (pmove:terminals1, val)
             LT -> (terminals1, worstcase1)
-          !node2 = trunk2terminal $ Trunk {moveq = moveq2
-                                         , sims = sims2
-                                         , wins = wins2
-                                         , terminals = terminals2
-                                         , worstcase = worstcase2}
+          !node2 = if val == playerBound (player gs) params
+            then Terminal val
+            else trunk2terminal $ Trunk {moveq = moveq2
+                                       , sims = sims2
+                                       , wins = wins2
+                                       , terminals = terminals2
+                                       , worstcase = worstcase2}
         _ -> HT.insert cache gs node2 >> return (w, node2) where
           !c1 = exploitation params
           !c2 = exploration params
@@ -283,29 +285,11 @@ advanceNode !params@(MCParams {numrollsSqrt, numrollsI}) !cache !gs = do
                                      sims2 (Just subsims1) (nodemean branch)
                         , pmove}
           !moveq3 = MQ.insert prio2 moveq2
-          !node2 = trunk2terminal $! Trunk {moveq = moveq3
-                                          , sims = sims2
-                                          , wins = wins2
-                                          , terminals = terminals1
-                                          , worstcase = worstcase1}
-
-
-        -- Terminal !val -> Just (val * numrollsSqrt params, undefined)
-        -- Bud _ _ _ _ -> Just undefined
-        -- Trunk {} -> Just undefined
-
-      -- let priority = undefined
-      --     moveq2 = MQ.insert (PrioMove {subsims = subsims prio + numrollsSqrt params
-      --                                 , pmove, priority}) moveq1
-      --     val = undefined
-      --     moveq' = if undefined then moveq1 else moveq2
-      --     trunk = Trunk {sims = sims node1 + numrollsSqrt params
-      --                  , wins = wins node1 + w
-      --                  , moveq = moveq'
-      --                  , terminals = undefined $ terminals node1
-      --                  , worstcase = val}
-      -- return undefined
-      -- return (w, if MQ.null moveq' || undefined $ val then Terminal $ val else trunk)
+          !node2 = Trunk {moveq = moveq3
+                        , sims = sims2
+                        , wins = wins2
+                        , terminals = terminals1
+                        , worstcase = worstcase1}
     where
       bud2trunk !(Bud !sims !wins !done []) = Trunk {sims, wins, moveq, terminals, worstcase} where
         !moveq = MQ.fromList $ map leaf2prio done
@@ -321,113 +305,6 @@ advanceNode !params@(MCParams {numrollsSqrt, numrollsI}) !cache !gs = do
         then Terminal worstcase
         else node
       trunk2terminal node = node
-
-{-
-
-The following 2 functions are good, but perhaps unneccesary
-
--- | It is what it is
--- playerObjectiveBy :: (Foldable t) => Player -> (a -> a -> Ordering) -> t a -> a
--- playerObjectiveBy !Maximizer = maximumBy
--- playerObjectiveBy !Minimizer = minimumBy
-
--- | Getter function from a terminal
--- terminalVal :: MCNode gs -> Maybe Value
--- terminalVal !(Terminal !v) = Just v
--- terminalVal !(InertTerminal !v) = Just v
--- terminalVal _ = Nothing
-
-
-
--- | Get actions from actions types
-mkActions :: MCActions -> [MCAction]
-mkActions (InertTerminal _) = []
-mkActions (Terminal _ xs) = xs
-mkActions (Trunk xs ys) = ys ++ (map action' $ MQ.toList xs)
-mkActions (Bud solved unsolved) = solved ++ (map f unsolved) where
-  f (str, gs) = (str, mkLeaf False gs)
-
-
--- | Creates a new leaf for the game (a node that has no children)
-mkLeaf :: GameState gs => Bool -> gs -> MCNode
-mkLeaf !inert' !gameState = MCNode {gameState, simulations, wins, children} where
-  !maybeval = terminal gameState
-  !simulations = 0
-  !wins = 0
-  !children = if isJust $! maybeval
-    then if inert'
-      then InertTerminal $ fromJust maybeval
-      else Terminal (fromJust maybeval) []
-    else Bud [] (actions $! gameState)
-
--- | Makes a trunk out of a completed bud
-mkTrunk :: Player -> MCParams -> Value -> [MCAction] -> MCActions
-mkTrunk !player !params@(MCParams{exploration, exploitation}) !totalsims !xs =
-  maybeTrunk $! partition nonterminal xs where
-    !testval = playerBound player params
-    nonterminal (_, !MCNode {children = Terminal _ _}) = False
-    nonterminal _ = True
-    terminalval (_, !MCNode {children = Terminal !realval _}) = realval
-    evalfunc (str, !mcNode) = PrioAction {
-      action' = (str, mcNode),
-      priority = exploitation*(playerValue player)*(avgVal mcNode) +
-                 exploration*sqrt((log totalsims)/subsims),
-      subsims} where !subsims = simulations mcNode
-    !objective = playerObjective player
-    maybeTrunk !([], !ys) = Terminal (objective $ map terminalval ys) ys
-    maybeTrunk !(!xs, !ys) = if (or $ map ((==testval) . terminalval) ys)
-      then Terminal testval (xs ++ ys)
-      else Trunk (MQ.fromList $ map evalfunc xs) ys
-
-
--- | Advance a node to improve heuristic
-advanceNode :: (RandomGen rg) => MCParams -> MCNode -> rg -> (MCNode, rg, Value)
-advanceNode !(MCParams {numrollsSqrt})
-            !mgs@(MCNode {children = (Terminal !tval _)}) !rand = (mgs, rand, tval*numrollsSqrt)
-advanceNode !(MCParams {numrollsSqrt})
-            !mgs@(MCNode {children = (InertTerminal !tval)}) !rand = (mgs, rand, tval*numrollsSqrt)
-advanceNode !params@(MCParams {numrollsI, numrollsSqrt, inert})
-            !mgs@(MCNode {simulations, wins=w, gameState,
-                          children = (Bud !post !pre)}) rand =
-  (mgs {simulations=simulations', wins = w+val, children = f children'}, rand', val) where
-    !simulations' = simulations+numrollsSqrt
-    !(!str, !gs) = head pre
-    !(!ngs, !rand') = rolloutNode numrollsI (mkLeaf inert gs) rand
-    !val = wins ngs
-    !player' = player gameState
-    !testval = playerBound player' params
-    !children' = Bud ((str, ngs) : post) (tail pre)
-    f !(Bud !post' []) = mkTrunk player' params simulations' post'
-    f !bud@(Bud !post' pre') = if terminalVal ngs == Just testval
-      then Terminal testval (post' ++ map (\(!str, !g) -> (str, mkLeaf False g)) pre')
-      else bud
-advanceNode !params@(MCParams{numrollsSqrt, exploration, exploitation, uniform})
-            !mgs@(MCNode {simulations=s, wins=w, gameState,
-                          children = !(Trunk !nonterminals !terminals)}) !rand =
-  (mgs {simulations = s', wins = w+val, children = f children'}, rand', val) where
-    (PrioAction {action' = (!str, !child), subsims = !ss'}, !queue) =
-      fromJust $! MQ.maxView nonterminals
-    !params' = params {uniform = False}
-    !exploitation' = if uniform then 0 else exploitation
-    !player' = player gameState
-    !objective = playerObjective player'
-    !s' = s + numrollsSqrt
-    (!child', !rand', !val) = advanceNode params' child rand
-    !nact = (str, child')
-    !children' = case child' of
-      MCNode {children = !(Terminal !tval _)} -> if tval == playerBound player' params
-        then Terminal tval (nact: (terminals ++ (map action' $ MQ.toList queue)))
-        else Trunk queue (nact:terminals)
-      otherwise -> Trunk (MQ.insert nprio queue) terminals where
-        !priority = exploitation*(playerValue player')*(avgVal child') +
-                    exploration*sqrt((log s)/ss')
-        !nprio = PrioAction {priority, action'=nact, subsims = ss' + numrollsSqrt}
-    f ch@(Trunk !q' nt') = if isNothing $! MQ.maxView q'
-      then Terminal (objective $ map (fromJust . terminalVal . snd) nt') nt'
-      else ch
-    f ch = ch
-
--}
 
 -- | Perform a single (uniform) rollout
 rollout :: (GameState gs, RandomGen r) => gs -> r -> (Value, r)
