@@ -57,6 +57,8 @@ instance GameState BoardState where
       f n (Board {content}) = content A.! (n, heights A.! n) ==
         if mod totalmoves 2 == 0 then Ex else Oh
 
+instance HGS BoardState
+
 -- | The array corresponding to the required positions needed to complete a win
 compsarr :: A.Array (Int, Int) [([(Int, Int)], [(Int, Int)])]
 compsarr = A.array ((0,0), (5, 6)) $ map comps $ (,) <$> [0..5] <*> [0..6] where

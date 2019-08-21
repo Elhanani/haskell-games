@@ -5,7 +5,9 @@
            , BangPatterns
            #-}
 
-module Minmax (minmaxSolver, ordMinmaxSolver, hashMinmaxSolver, singleLRUMinmaxSolver) where
+module Minmax (module SolverDefs
+             , minmaxSolver, ordMinmaxSolver
+             , hashMinmaxSolver, singleLRUMinmaxSolver) where
 
 import SolverDefs
 import Control.Monad.State

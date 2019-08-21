@@ -7,7 +7,7 @@ import NimEuclidean
 import NimFibonacci
 import Nim
 import Minmax
-import MCTS
+import MCTS2
 
 main = do
   putStrLn ""

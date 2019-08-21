@@ -4,14 +4,15 @@
            , BangPatterns
              #-}
 
-module SolverDefs (Value, Player(..), GameState(..), SolvedGameState(..),
-                   playerValue, playerObjective, otherPlayer, randomAction,
+module SolverDefs (Value, Player(..), GameState(..), SolvedGameState(..), HGS,
+                   playerValue, playerObjective, playerComp, otherPlayer,
                    StatelessSolvedGame, statelessSolver, randomSolver, humanSolver,
-                   interaction, humanInteraction) where
+                   interaction, humanInteraction, randomAction) where
 
 import System.Random
 import System.IO
 import Data.Maybe
+import Data.Hashable
 
 type Value = Double
 data Player = Maximizer | Minimizer deriving (Eq, Ord)
@@ -19,6 +20,10 @@ data Player = Maximizer | Minimizer deriving (Eq, Ord)
 playerValue :: Player -> Value
 playerValue Maximizer = 1
 playerValue Minimizer = -1
+
+playerComp :: Player -> Value -> Value -> Ordering
+playerComp Maximizer = compare
+playerComp Minimizer = flip compare
 
 playerObjective :: (Foldable t, Ord a) => Player -> t a -> a
 playerObjective Maximizer = maximum
@@ -63,8 +68,11 @@ class (GameState gs) => SolvedGameState gs where
   action :: gs -> IO (String, gs)
   -- | Perform computation on another thread
   think :: gs -> IO (IO gs)
+  
+  think = return . return
 
-  think g = return $ return g
+-- | A class for a game which is also Hashable and Ord
+class (GameState gs, Eq gs, Hashable gs, Ord gs) => HGS gs
 
 -- | A generic way to define a game solver
 data StatelessSolvedGame = forall gs. GameState gs =>

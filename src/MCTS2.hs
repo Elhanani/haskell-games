@@ -28,7 +28,7 @@ import qualified Data.PQueue.Max as MQ
 import qualified Data.Map as M
 import qualified Data.HashTable.IO as HT
 
-class (GameState gs, Eq gs, Hashable gs, Ord gs) => HGS gs
+import Debug.Trace
 
 -- | exploration/expolitation are coefficients for the UCB funtion
 --   alpha, beta are values that will stop the search
@@ -95,12 +95,12 @@ data MCSolvedGame gs =
 data MCNode gs =
      InertTerminal {-# UNPACK #-} !Value
    | Terminal {-# UNPACK #-} !Value
-   | Bud ![(gs, (Value, Value))] ![gs]
+   | Bud !Value !Value ![(gs, (Value, Value))] ![gs]
    | Trunk {sims :: {-# UNPACK #-} !Value
           , wins :: {-# UNPACK #-} !Value
           , moveq :: !(MQ.MaxQueue (PrioMove gs))
           , terminals :: [gs]
-          , worstcase :: !Value} -- this can be meaningful with lcb as well.
+          , worstcase :: !Value} -- Can this can be meaningful with lcb as well?
 
 data PrioMove gs = PrioMove {priority :: {-# UNPACK #-} !Value
                            , subsims :: {-# UNPACK #-} !Value
@@ -117,16 +117,6 @@ type IOCache gs = HT.CuckooHashTable gs (MCNode gs)
 playerBound :: Player -> MCParams -> Value
 playerBound !Maximizer = beta
 playerBound !Minimizer = alpha
-
--- playerObjectiveBy :: (Foldable t) => Player -> (a -> a -> Ordering) -> t a -> a
--- playerObjectiveBy !Maximizer = maximumBy
--- playerObjectiveBy !Minimizer = minimumBy
-
--- | Getter function from a terminal
--- terminalVal :: MCNode gs -> Maybe Value
--- terminalVal !(Terminal !v) = Just v
--- terminalVal !(InertTerminal !v) = Just v
--- terminalVal _ = Nothing
 
 instance Show gs => Show (MCSolvedGame gs) where
   show = show . gameState
@@ -149,7 +139,11 @@ cache2io (MCCache cachelist) n = HT.fromListWithSizeHint (n + length cachelist) 
 
 -- | Find in cache or create new
 getNode :: (HGS gs) => IOCache gs -> gs -> IO (MCNode gs)
-getNode cache gs = fmap (fromMaybe (Bud [] $ map snd $ actions gs) )$ HT.lookup cache gs
+getNode cache gs = fmap (fromMaybe mkLeaf) $ HT.lookup cache gs where
+  mkLeaf = case terminal gs of
+    Just !val -> Terminal val
+    -- This is wrong, and ignores inerts!
+    Nothing -> Bud 0 0 [] $ map snd $ actions gs
 
 instance (HGS gs) => SolvedGameState (MCSolvedGame gs) where
   action (MCSolvedGame {gameState, mcCache, mcParams}) = do
@@ -160,26 +154,33 @@ instance (HGS gs) => SolvedGameState (MCSolvedGame gs) where
     threadDelay $ 1000 * duration mcParams
     worker
     rootnode <- getNode cache gameState
+    let woof (Trunk {sims, wins, moveq}) = print (sims, wins, map priority $ MQ.toList moveq)
+        woof (Terminal val) = print val
+        woof (Bud a b c d) = print (a, b, length c, length d)
+    woof rootnode
+    putStrLn ""
     childnodes <- mapM (getNode cache) children
-    let bestgs = bestactions mcParams (gameState, rootnode) $ zip children childnodes
-        best = zip (map (\gs -> fromJust $ lookup gs $ map swap $ actions gs) bestgs) bestgs
-    (str, newgs) <- if length bestgs == 1 then return $ head best else do
+    mapM_ woof childnodes
+    let !bestgs = bestactions mcParams (gameState, rootnode) $ zip children childnodes
+        !best = zip (map (\gs -> fromJust $ lookup gs $ map swap $ actions gameState) bestgs) bestgs
+    (str, newgs) <- if length best == 1 then return $ head best else do
       let f = fromMaybe (lessevilMCTS mcParams) $ lessevil mcParams
       beststr <- f gameState $ map fst best
       return $ (beststr, fromJust $ lookup beststr gsactions)
     cachelist <- HT.toList cache
-    let f = fromMaybe (const True) $ lookup str $ actionfilters gameState
+    let f = const True -- fromMaybe (const True) $ lookup str $ actionfilters gameState
         newcache = MCCache (filter (f . fst) cachelist)
     return (str, MCSolvedGame {mcParams, gameState = newgs, mcCache = newcache})
-  think (MCSolvedGame {gameState, mcParams, mcCache}) = do
-    let gsactions = actions gameState
-        children = map snd gsactions
-    cache <- cache2io mcCache $ extracache mcParams
-    worker <- advanceUntil (mcParams {uniform=True}) cache gameState
-    return $ do
-      worker
-      cachelist <- HT.toList cache
-      return MCSolvedGame {gameState, mcParams, mcCache = MCCache cachelist}
+  think g = putStr "fix thinking!" >> (return $ return g)
+  -- think (MCSolvedGame {gameState, mcParams, mcCache}) = do
+  --   let gsactions = actions gameState
+  --       children = map snd gsactions
+  --   cache <- cache2io mcCache $ extracache mcParams
+  --   worker <- advanceUntil (mcParams {uniform=True}) cache gameState
+  --   return $ do
+  --     worker
+  --     cachelist <- HT.toList cache
+  --     return MCSolvedGame {gameState, mcParams, mcCache = MCCache cachelist}
 
 -- | Selects the best actions to play using lcb
 defaultBestactions :: HGS gs => Value -> (gs, MCNode gs) -> [(gs, MCNode gs)] -> [gs]
@@ -192,39 +193,45 @@ defaultBestactions !ratio (!gs, Trunk {sims, moveq, terminals, worstcase}) !chil
   nodes = map (fromJust . flip lookup children . pmove) moves
   pl = player gs
   f = confidence pl False 1 ratio sims
-  trunks = zip (zipWith f (map Just $ moves) nodes) (map pmove moves)
+  trunks = zip (zipWith f (map (Just . subsims) moves) (map nodemean nodes)) (map pmove moves)
   (bestval, bestgame) = maximum trunks
-  res = if bestval > worstcase then [bestgame] else terminals
+  res = [bestgame] -- temporary fix
+  -- res = if bestval > worstcase then [bestgame] else terminals
+
 
 -- | UCB or LCB - used to rate the moves
-confidence :: HGS gs => Player -> Bool -> Value -> Value ->
-                        Value -> Maybe (PrioMove gs) -> MCNode gs -> Value
-confidence player upper c1 c2 num move node = c1 * p1 * mean node + c2 * p2 * stdv move where
+confidence :: Player -> Bool -> Value -> Value ->
+              Value -> Maybe Value -> Value -> Value
+confidence player upper c1 c2 num subs mean = c1 * p1 * mean + c2 * p2 * stdv subs where
   !maximizer = player == Maximizer
   !p1 = if maximizer then 1 else -1
-  !p2 = if maximizer == upper then 1 else -1
-  mean (!InertTerminal !val) = val
-  mean (!Terminal !val) = val
-  mean (!Bud !leaves _ ) = (sum $ map (fst . snd) leaves) / (sum $ map (snd . snd) leaves)
-  mean (!Trunk {sims, wins}) = wins/sims
-  stdv (!Just (!PrioMove {subsims})) = sqrt $ (log num) / (subsims)
+  !p2 = if upper then 1 else -1
+  stdv (!Just subsims) = sqrt $ log num / subsims
   stdv (!Nothing) = 0
+
+-- | Mean value of a node
+nodemean :: MCNode gs -> Value
+nodemean (!InertTerminal !val) = val
+nodemean (!Terminal !val) = val
+nodemean (!Bud !sims !wins _ _ ) = wins/sims
+nodemean (!Trunk {sims, wins}) = wins/sims
+
 
 -- | Advances until the resulting function is called
 advanceUntil :: HGS gs => MCParams -> IOCache gs -> gs -> IO (IO ())
 advanceUntil !params !cache !gs = if background $! params then do
   mfinish <- newMVar False
   let !maxsim' = fromIntegral $! maxsim $! params
-      stopcond !(Bud _ _) = False
+      stopcond !(Bud _ _ _ _) = False
       stopcond !(Trunk {sims}) = sims > maxsim'
       stopcond _ = True
       totalsim !(Trunk {sims}) = sims
       totalsim _ = 0
       internal = do
-        Just node <- HT.lookup cache gs
+        node <- getNode cache gs
         let !newrolls = floor ((totalsim node) / (simsperroll params)) + numrollsI params
             !params' = params {numrollsI = newrolls, numrollsSqrt = sqrt $! fromIntegral newrolls}
-        replicateM_ (advancechunks params) $ advanceState params' cache gs
+        replicateM_ (advancechunks params) $ advanceNode params' cache gs
         hFlush stdout -- why?
         finish <- readMVar mfinish
         if finish || stopcond node
@@ -236,50 +243,100 @@ advanceUntil !params !cache !gs = if background $! params then do
     wait solver
   else return $ return ()
 
-advanceState :: HGS gs => MCParams -> IOCache gs -> gs -> IO ()
-advanceState !params !cache !gs = do
-  node <- getNode cache gs
-  return undefined
+advanceNode :: HGS gs => MCParams -> IOCache gs -> gs -> IO (Value, MCNode gs)
+advanceNode !params@(MCParams {numrollsSqrt, numrollsI}) !cache !gs = do
+  node1 <- getNode cache gs
+  case node1 of
+    InertTerminal !val -> return (val * numrollsSqrt, node1)
+    Terminal !val -> return (val * numrollsSqrt, node1)
+    Bud !sims !wins !done !(ngs:rest) -> do
+      rand <- newStdGen
+      let !n = numrollsI
+          !sqrtn = numrollsSqrt
+          !w = (fst $ rollouts n ngs rand) / sqrtn
+          !node2 = bud2trunk $! Bud (sims+sqrtn) (wins+w) ((ngs, (w, sqrtn)):done) rest
+      HT.insert cache gs node2
+      return (w, node2)
+    Trunk {sims = sims1, wins = wins1, moveq = moveq1
+         , terminals = terminals1, worstcase = worstcase1} -> do
+      let Just (!prio1@(PrioMove {pmove}), !moveq2) = MQ.maxView moveq1
+      (w, branch) <- advanceNode params cache pmove
+      let !sims2 = sims1 + numrollsSqrt
+          !wins2 = wins1 + w
+      case branch of
+        Terminal !val -> HT.insert cache gs node2 >> return (w, node2) where
+          (terminals2, worstcase2) = case (playerComp $! player gs) val worstcase1 of
+            GT -> ([pmove], val)
+            EQ -> (pmove:terminals1, val)
+            LT -> (terminals1, worstcase1)
+          !node2 = trunk2terminal $ Trunk {moveq = moveq2
+                                         , sims = sims2
+                                         , wins = wins2
+                                         , terminals = terminals2
+                                         , worstcase = worstcase2}
+        _ -> HT.insert cache gs node2 >> return (w, node2) where
+          !c1 = exploitation params
+          !c2 = exploration params
+          !subsims1 = subsims prio1 + numrollsSqrt
+          !prio2 = prio1 {subsims = subsims1
+                        , priority = confidence (player gs) True c1 c2
+                                     sims2 (Just subsims1) (nodemean branch)
+                        , pmove}
+          !moveq3 = MQ.insert prio2 moveq2
+          !node2 = trunk2terminal $! Trunk {moveq = moveq3
+                                          , sims = sims2
+                                          , wins = wins2
+                                          , terminals = terminals1
+                                          , worstcase = worstcase1}
 
 
-advanceNode :: HGS gs => MCParams -> IOCache gs -> MCNode gs -> gs -> IO Value
-advanceNode !params _ (InertTerminal !val) _ = return $ val * numrollsSqrt params
-advanceNode !params _ (Terminal !val) _ = return $ val * numrollsSqrt params
-advanceNode !params !cache (Bud !done !(ngs:rest)) _ = do
-  rand <- newStdGen
-  let !n = numrollsI params
-      !sqrtn = numrollsSqrt params
-      !w = (fst $ rollouts n ngs rand) / sqrtn
-      !node = Bud ((ngs, (w, sqrtn)):done) rest
-  HT.insert cache ngs node
-  return w
-advanceNode !params !cache (Bud !done []) !gs =
-  advanceNode params cache (Trunk {sims, wins, moveq, terminals, worstcase}) gs where
-    !wins = sum $ map (fst . snd) done
-    !sims = sum $ map (snd . snd) done
-    !moveq = MQ.fromList $ map (leaf2prio gs params) done
-    !terminals = []
-    !worstcase = playerBound (otherPlayer $ player gs) params
+        -- Terminal !val -> Just (val * numrollsSqrt params, undefined)
+        -- Bud _ _ _ _ -> Just undefined
+        -- Trunk {} -> Just undefined
 
-advanceNode params cache (Trunk {}) gs = do
-  return undefined
-
-leaf2prio :: (HGS gs) => gs -> MCParams -> (gs, (Value, Value)) -> PrioMove gs
-leaf2prio gs params (pmove, (subsims, wins)) = PrioMove {priority, subsims, pmove} where
-  !c1 = exploitation params
-  !c2 = exploration params
-  !absval = c1 * (wins / subsims) +
-            c2 * (sqrt $ (log $ fromIntegral $ numactions gs) / subsims)
-  !priority = case player gs of
-    Maximizer -> absval
-    Minimizer -> -absval
-
+      -- let priority = undefined
+      --     moveq2 = MQ.insert (PrioMove {subsims = subsims prio + numrollsSqrt params
+      --                                 , pmove, priority}) moveq1
+      --     val = undefined
+      --     moveq' = if undefined then moveq1 else moveq2
+      --     trunk = Trunk {sims = sims node1 + numrollsSqrt params
+      --                  , wins = wins node1 + w
+      --                  , moveq = moveq'
+      --                  , terminals = undefined $ terminals node1
+      --                  , worstcase = val}
+      -- return undefined
+      -- return (w, if MQ.null moveq' || undefined $ val then Terminal $ val else trunk)
+    where
+      bud2trunk !(Bud !sims !wins !done []) = Trunk {sims, wins, moveq, terminals, worstcase} where
+        !moveq = MQ.fromList $ map leaf2prio done
+        !terminals = []
+        !worstcase = playerBound (otherPlayer $ player gs) params
+        leaf2prio (pmove, (subsims, subwins)) = PrioMove {priority, subsims, pmove} where
+          !c1 = exploitation params
+          !c2 = exploration params
+          !p1 = playerValue $ player gs
+          !priority = p1 * c1 * (subwins / subsims) + c2 * (sqrt $ (log sims) / subsims)
+      bud2trunk node = node
+      trunk2terminal node@(Trunk {moveq, worstcase}) = if MQ.null moveq
+        then Terminal worstcase
+        else node
+      trunk2terminal node = node
 
 {-
--- reminder
-data PrioMove gs = PrioMove {priority :: {-# UNPACK #-} !Value
-                           , subsims :: {-# UNPACK #-} !Value
-                           , pmove :: !gs}
+
+The following 2 functions are good, but perhaps unneccesary
+
+-- | It is what it is
+-- playerObjectiveBy :: (Foldable t) => Player -> (a -> a -> Ordering) -> t a -> a
+-- playerObjectiveBy !Maximizer = maximumBy
+-- playerObjectiveBy !Minimizer = minimumBy
+
+-- | Getter function from a terminal
+-- terminalVal :: MCNode gs -> Maybe Value
+-- terminalVal !(Terminal !v) = Just v
+-- terminalVal !(InertTerminal !v) = Just v
+-- terminalVal _ = Nothing
+
 
 
 -- | Get actions from actions types
