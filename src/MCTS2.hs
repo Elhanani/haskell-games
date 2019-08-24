@@ -93,8 +93,7 @@ data MCSolvedGame gs =
 --   Trunks are states with fully evaluated children
 --   Buds are states where some children have not yet been evaluated
 data MCNode gs =
-     InertTerminal {-# UNPACK #-} !Value
-   | Terminal {-# UNPACK #-} !Value
+     Terminal {-# UNPACK #-} !Value
    | Bud !Value !Value ![(gs, (Value, Value))] ![gs]
    | Trunk {sims :: {-# UNPACK #-} !Value
           , wins :: {-# UNPACK #-} !Value
@@ -147,12 +146,19 @@ getNode cache gs = fmap (fromMaybe mkLeaf) $ HT.lookup cache gs where
 
 instance (HGS gs) => SolvedGameState (MCSolvedGame gs) where
   action (MCSolvedGame {gameState, mcCache, mcParams}) = do
-    let gsactions = actions gameState
-        children = map snd gsactions
+    print "hey1"
+    let !gsactions = actions gameState
+    print ("hey2", length gsactions)
+    let !children = map snd gsactions
+    print ("hey3", length children)
+    let MCCache !x1 = mcCache
+    print ("cache1", length x1)
     cache <- cache2io mcCache $ extracache mcParams
     worker <- advanceUntil mcParams cache gameState
     threadDelay $ 1000 * duration mcParams
     worker
+    x2 <- HT.toList cache
+    print ("cache2", length x2)
     rootnode <- getNode cache gameState
     let woof (Trunk {sims, wins, moveq}) = print (sims, wins, map priority $ MQ.toList moveq)
         woof (Terminal val) = print val
@@ -161,7 +167,8 @@ instance (HGS gs) => SolvedGameState (MCSolvedGame gs) where
     putStrLn ""
     childnodes <- mapM (getNode cache) children
     mapM_ woof childnodes
-    let !bestgs = bestactions mcParams (gameState, rootnode) $ zip children childnodes
+    let shortcut = id -- if rootnode is Terminal with val=playerBound then take just 1
+        !bestgs = shortcut $ bestactions mcParams (gameState, rootnode) $ zip children childnodes
         !best = zip (map (\gs -> fromJust $ lookup gs $ map swap $ actions gameState) bestgs) bestgs
     (str, newgs) <- if length best == 1 then return $ head best else do
       let f = fromMaybe (lessevilMCTS mcParams) $ lessevil mcParams
@@ -211,7 +218,6 @@ confidence player upper c1 c2 num subs mean = c1 * p1 * mean + c2 * p2 * stdv su
 
 -- | Mean value of a node
 nodemean :: MCNode gs -> Value
-nodemean (!InertTerminal !val) = val
 nodemean (!Terminal !val) = val
 nodemean (!Bud !sims !wins _ _ ) = wins/sims
 nodemean (!Trunk {sims, wins}) = wins/sims
@@ -219,7 +225,7 @@ nodemean (!Trunk {sims, wins}) = wins/sims
 
 -- | Advances until the resulting function is called
 advanceUntil :: HGS gs => MCParams -> IOCache gs -> gs -> IO (IO ())
-advanceUntil !params !cache !gs = if background $! params then do
+advanceUntil !params !cache !gs = do -- if background $! params then do
   mfinish <- newMVar False
   let !maxsim' = fromIntegral $! maxsim $! params
       stopcond !(Bud _ _ _ _) = False
@@ -241,13 +247,12 @@ advanceUntil !params !cache !gs = if background $! params then do
   return $ do
     swapMVar mfinish True
     wait solver
-  else return $ return ()
+  -- else return $ return ()
 
 advanceNode :: HGS gs => MCParams -> IOCache gs -> gs -> IO (Value, MCNode gs)
 advanceNode !params@(MCParams {numrollsSqrt, numrollsI}) !cache !gs = do
   node1 <- getNode cache gs
   case node1 of
-    InertTerminal !val -> return (val * numrollsSqrt, node1)
     Terminal !val -> return (val * numrollsSqrt, node1)
     Bud !sims !wins !done !(ngs:rest) -> do
       rand <- newStdGen
@@ -263,8 +268,8 @@ advanceNode !params@(MCParams {numrollsSqrt, numrollsI}) !cache !gs = do
       (w, branch) <- advanceNode params cache pmove
       let !sims2 = sims1 + numrollsSqrt
           !wins2 = wins1 + w
-      case branch of
-        Terminal !val -> HT.insert cache gs node2 >> return (w, node2) where
+      case (branch, inert params) of
+        (Terminal !val, False) -> HT.insert cache gs node2 >> return (w, node2) where
           (terminals2, worstcase2) = case (playerComp $! player gs) val worstcase1 of
             GT -> ([pmove], val)
             EQ -> (pmove:terminals1, val)
@@ -329,17 +334,18 @@ mctsSolver mcParams gameState = MCSolvedGame {gameState, mcParams, mcCache} wher
 
 -- | returns the least losing action
 lessevilMCTS :: HGS gs => MCParams -> gs -> [String] -> IO String
-lessevilMCTS params gs strs = do
-  let gsactions = actions gs
-      children = map snd gsactions
-  cache <- cache2io emptyCache $ extracache params
-  worker <- advanceUntil (params {inert = True}) cache gs
-  threadDelay $ 1000 * duration params
-  worker
-  rootnode <- getNode cache gs
-  childnodes <- mapM (getNode cache) children
-  let best = head $ bestactions params (gs, rootnode) $ zip children childnodes
-  return $ fromJust $ lookup best $ map swap $ actions gs
+lessevilMCTS _ _ xs = return $ head xs
+-- lessevilMCTS params gs strs = do
+--   let gsactions = actions gs
+--       children = map snd gsactions
+--   cache <- cache2io emptyCache $ extracache params
+--   worker <- advanceUntil (params {inert = True}) cache gs
+--   threadDelay $ 1000 * duration params
+--   worker
+--   rootnode <- getNode cache gs
+--   childnodes <- mapM (getNode cache) children
+--   let best = head $ bestactions params (gs, rootnode) $ zip children childnodes
+--   return $ fromJust $ lookup best $ map swap $ actions gs
 
 {-
 -- | Multithreaded MCTS solver
